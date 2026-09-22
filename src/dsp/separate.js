@@ -3,35 +3,93 @@ import { STFT } from './stft.js';
 export const SEPARATION_DEFAULTS = {
   frameSize: 4096,
   hopSize: 1024,
-  /** Mask steepness. Higher pulls more borderline content out of the vocal stem. */
+  /** Mask steepness. Higher drives borderline bins towards fully in or fully out. */
   exponent: 2,
-  /** Below this, content is treated as bass and kept in the instrumental. */
+  /** Below this, content is treated as bass and kept in the backing track. */
   lowCutHz: 180,
   /** Above this, content is treated as cymbals and air, and kept likewise. */
   highCutHz: 10000,
+  /**
+   * How hard panned content is subtracted off the centre estimate. Above 1 this is
+   * deliberate over-subtraction: it costs a little vocal-stem quality and buys a
+   * noticeably cleaner backing track, which is the trade a karaoke track wants.
+   */
+  sideSubtraction: 1.35,
+  /** How hard broadband content is subtracted, which is what protects the drums. */
+  percussiveSubtraction: 1,
+  /**
+   * How hard sustained content is subtracted, which is what protects centre-panned
+   * keys, pads and guitars. Stereo position cannot tell those from a lead vocal --
+   * they are all dead centre -- so without this the accompaniment is gutted along
+   * with the voice and the backing track comes out hollow.
+   */
+  sustainedSubtraction: 0.5,
+  /**
+   * Gain on the vocal estimate when it is removed from the backing track. At 1 the
+   * two stems sum back to the input exactly; above 1 the backing track is scrubbed
+   * harder at the cost of that guarantee.
+   */
+  overSubtraction: 1,
 };
 
 /**
- * How centred a frequency bin is, from the two channel spectra.
+ * Width of the broadband floor estimate, as taps and the bin stride between them.
  *
- *   2 * Re(L * conj(R)) / (|L|^2 + |R|^2)
- *
- * One expression covering both things that matter: it reaches 1 only when the
- * two channels agree in phase AND in magnitude, falls to 0 when either channel
- * is silent, and goes negative for out-of-phase content. Lead vocals sit near
- * 1 because they are almost always mixed dead centre.
+ * Nine taps two bins apart span +/-8 bins, which at 4096 clears the four-bin main
+ * lobe a windowed sine occupies. So a tonal peak sees a floor drawn from its far
+ * skirt -- near zero, no penalty -- while a drum hit, broadband by nature, sees a
+ * floor as tall as itself and is held out of the vocal stem.
  */
-function centredness(lre, lim, rre, rim) {
-  const dot = lre * rre + lim * rim;
-  const energy = lre * lre + lim * lim + rre * rre + rim * rim;
-  if (energy < 1e-20) return 0;
-  return (2 * dot) / energy;
+const FLOOR_TAPS = 9;
+const FLOOR_STRIDE = 2;
+
+/**
+ * Width of the sustained estimate, as taps and the frame stride between them.
+ *
+ * Eleven taps four frames apart reach +/-20 frames, which at 1024 is a little under
+ * half a second either side. Held notes sit still for that long and read as
+ * accompaniment; a sung line, with its vibrato and its movement between notes, does
+ * not hold any one bin for half a second and reads as voice.
+ */
+const TIME_TAPS = 11;
+const TIME_STRIDE = 4;
+const TIME_REACH = ((TIME_TAPS - 1) >> 1) * TIME_STRIDE;
+
+/** Median of `count` values gathered in `scratch`, sorted in place. */
+function medianOf(scratch, count) {
+  for (let a = 1; a < count; a++) {
+    const v = scratch[a];
+    let b = a - 1;
+    while (b >= 0 && scratch[b] > v) { scratch[b + 1] = scratch[b]; b--; }
+    scratch[b + 1] = v;
+  }
+  return scratch[count >> 1];
 }
 
 /**
- * Band weighting. Bass and kick drums are mixed dead centre too, so centredness
- * alone would drag them into the vocal stem and leave a hollow instrumental.
- * Raised-cosine edges avoid audible ringing at the transitions.
+ * Median magnitude around each bin: an estimate of the broadband floor under it.
+ *
+ * A median rather than a mean, because a mean is dragged up by the very peak we are
+ * trying to measure the floor beneath.
+ */
+function broadbandFloor(mag, half, out, scratch) {
+  const centre = (FLOOR_TAPS - 1) >> 1;
+  for (let k = 0; k <= half; k++) {
+    for (let t = 0; t < FLOOR_TAPS; t++) {
+      // Reflect at the band edges so the first and last bins get a real window.
+      let idx = k + (t - centre) * FLOOR_STRIDE;
+      if (idx < 0) idx = -idx;
+      if (idx > half) idx = 2 * half - idx;
+      scratch[t] = mag[idx];
+    }
+    out[k] = medianOf(scratch, FLOOR_TAPS);
+  }
+}
+
+/**
+ * Band weighting. Bass and kick drums are mixed dead centre too, so a centre
+ * estimate alone would drag them into the vocal stem and leave a hollow backing
+ * track. Raised-cosine edges avoid audible ringing at the transitions.
  */
 function bandWeight(freq, lowCut, highCut) {
   const lowEnd = lowCut * 1.6;
@@ -43,13 +101,9 @@ function bandWeight(freq, lowCut, highCut) {
 }
 
 function buildBandWeights(frameSize, sampleRate, lowCut, highCut) {
-  const w = new Float64Array(frameSize);
   const half = frameSize >> 1;
-  for (let k = 0; k <= half; k++) {
-    const weight = bandWeight((k * sampleRate) / frameSize, lowCut, highCut);
-    w[k] = weight;
-    if (k > 0 && k < half) w[frameSize - k] = weight;
-  }
+  const w = new Float64Array(half + 1);
+  for (let k = 0; k <= half; k++) w[k] = bandWeight((k * sampleRate) / frameSize, lowCut, highCut);
   return w;
 }
 
@@ -66,16 +120,39 @@ function isMono(left, right) {
 }
 
 /**
- * Split a stereo track into a vocal stem and an instrumental stem.
+ * Split a stereo track into a vocal stem and a backing track.
  *
- * Only the vocal stem is synthesised; the instrumental is the original minus
- * that. Overlap-add is linear, so the subtraction yields exactly what masking
- * with (1 - mask) would have produced, for half the inverse transforms, and it
- * makes the two stems sum back to the original bit for bit.
+ * The mix is read as mid and side rather than left and right, and each bin of the
+ * mid is asked three questions at once. How much of it is panned away from centre,
+ * measured directly as the side magnitude. How much of it is broadband, measured as
+ * the median across neighbouring bins, which is what a drum looks like. How much of
+ * it is holding still, measured as the median across neighbouring frames, which is
+ * what a held chord looks like. Whatever is left over is centred, tonal and moving,
+ * and that is a lead vocal:
  *
- * Exposed as a generator that yields a 0..1 progress fraction. A file:// page
- * cannot spawn a Worker, so the browser drives this loop in slices to stay
- * responsive; `separate` below drives it straight through.
+ *   vocal ~= |mid| - sideSubtraction * |side|
+ *                  - max(percussiveSubtraction * broadband, sustainedSubtraction * sustained)
+ *
+ * The last term is the one that matters most in practice. Keys, pads and rhythm
+ * guitars are mixed dead centre just like the voice, so stereo position alone cannot
+ * separate them and a centre-extraction engine strips them out along with the vocal,
+ * which is what leaves a karaoke track sounding hollow. Time structure can separate
+ * them, because a held chord occupies one bin for half a second and a sung phrase
+ * never does.
+ *
+ * Subtraction rather than a correlation ratio is the other half of it. A correlation
+ * between the channels collapses as soon as a panned instrument shares a bin with the
+ * voice, so the mask goes soft exactly where the voice is loudest and the lead
+ * survives into the backing track. Subtraction stays accurate there.
+ *
+ * Only the vocal stem is synthesised, as a true centre signal. The backing track is
+ * the input minus that, which leaves the entire side signal untouched, so panned
+ * instruments come through exactly as they were recorded and the stereo image is
+ * preserved rather than rebuilt.
+ *
+ * Exposed as a generator that yields a 0..1 progress fraction. A file:// page cannot
+ * spawn a Worker, so the browser drives this loop in slices to stay responsive;
+ * `separate` below drives it straight through.
  */
 export function* separateSteps(left, right, sampleRate, options = {}) {
   const opts = { ...SEPARATION_DEFAULTS, ...options };
@@ -83,42 +160,111 @@ export function* separateSteps(left, right, sampleRate, options = {}) {
   const stft = new STFT(opts.frameSize, opts.hopSize);
   const band = buildBandWeights(opts.frameSize, sampleRate, opts.lowCutHz, opts.highCutHz);
 
-  const lre = new Float64Array(opts.frameSize);
-  const lim = new Float64Array(opts.frameSize);
-  const rre = new Float64Array(opts.frameSize);
-  const rim = new Float64Array(opts.frameSize);
-
-  const accL = stft.createAccumulator(length);
-  const accR = stft.createAccumulator(length);
+  const n = opts.frameSize;
+  const half = n >> 1;
+  const bins = half + 1;
   const frames = stft.frameCount(length);
 
-  for (let f = 0; f < frames; f++) {
-    stft.analyzeFrame(left, f, lre, lim);
-    stft.analyzeFrame(right, f, rre, rim);
+  // The sustained estimate needs frames from either side of the one being written,
+  // so analysis runs ahead of synthesis and the frames in between wait in a ring.
+  const ring = 2 * TIME_REACH + 1;
+  const midRe = new Float64Array(ring * n);
+  const midIm = new Float64Array(ring * n);
+  const midMag = new Float64Array(ring * bins);
+  const sideMag = new Float64Array(ring * bins);
 
-    for (let k = 0; k < opts.frameSize; k++) {
-      const w = band[k];
-      let mask = 0;
-      if (w > 0) {
-        const c = centredness(lre[k], lim[k], rre[k], rim[k]);
-        if (c > 0) mask = Math.pow(c, opts.exponent) * w;
+  const lre = new Float64Array(n);
+  const lim = new Float64Array(n);
+  const rre = new Float64Array(n);
+  const rim = new Float64Array(n);
+  const floor = new Float64Array(bins);
+  const sustained = new Float64Array(bins);
+  const scratch = new Float64Array(Math.max(FLOOR_TAPS, TIME_TAPS));
+
+  const accVocal = stft.createAccumulator(length);
+  const total = frames + TIME_REACH;
+
+  for (let f = 0; f < total; f++) {
+    if (f < frames) {
+      stft.analyzeFrame(left, f, lre, lim);
+      stft.analyzeFrame(right, f, rre, rim);
+
+      const slot = (f % ring) * n;
+      const magSlot = (f % ring) * bins;
+      for (let k = 0; k < n; k++) {
+        midRe[slot + k] = (lre[k] + rre[k]) * 0.5;
+        midIm[slot + k] = (lim[k] + rim[k]) * 0.5;
       }
-      lre[k] *= mask; lim[k] *= mask;
-      rre[k] *= mask; rim[k] *= mask;
+      for (let k = 0; k <= half; k++) {
+        midMag[magSlot + k] = Math.hypot(midRe[slot + k], midIm[slot + k]);
+        sideMag[magSlot + k] = Math.hypot((lre[k] - rre[k]) * 0.5, (lim[k] - rim[k]) * 0.5);
+      }
     }
 
-    stft.addFrame(accL, f, lre, lim);
-    stft.addFrame(accR, f, rre, rim);
-    if ((f & 31) === 0) yield f / frames;
+    const fc = f - TIME_REACH;
+    if (fc < 0) continue;
+
+    const slot = (fc % ring) * n;
+    const magSlot = (fc % ring) * bins;
+    broadbandFloor(midMag.subarray(magSlot, magSlot + bins), half, floor, scratch);
+
+    for (let k = 0; k <= half; k++) {
+      for (let t = 0; t < TIME_TAPS; t++) {
+        // Hold at the ends of the track rather than reflecting: there is no
+        // meaningful "before the first frame" to average against.
+        let g = fc + (t - ((TIME_TAPS - 1) >> 1)) * TIME_STRIDE;
+        if (g < 0) g = 0;
+        if (g > frames - 1) g = frames - 1;
+        scratch[t] = midMag[(g % ring) * bins + k];
+      }
+      sustained[k] = medianOf(scratch, TIME_TAPS);
+    }
+
+    for (let k = 0; k <= half; k++) {
+      const w = band[k];
+      const mag = midMag[magSlot + k];
+      let mask = 0;
+      if (w > 0 && mag > 1e-12) {
+        const structure = Math.max(
+          opts.percussiveSubtraction * floor[k],
+          opts.sustainedSubtraction * sustained[k]
+        );
+        const vocal = mag - opts.sideSubtraction * sideMag[magSlot + k] - structure;
+        if (vocal > 0) {
+          // Wiener form: whatever the subtraction did not claim is the accompaniment,
+          // and the exponent decides how sharply the line between them is drawn.
+          const accompaniment = mag - vocal;
+          const v = Math.pow(vocal, opts.exponent);
+          const a = Math.pow(accompaniment, opts.exponent);
+          mask = (v / (v + a)) * w;
+        }
+      }
+      midRe[slot + k] *= mask;
+      midIm[slot + k] *= mask;
+      if (k > 0 && k < half) {
+        midRe[slot + n - k] *= mask;
+        midIm[slot + n - k] *= mask;
+      }
+    }
+
+    stft.addFrame(accVocal, fc, midRe.subarray(slot, slot + n), midIm.subarray(slot, slot + n));
+    if ((f & 31) === 0) yield f / total;
   }
 
-  const vocalsL = stft.finish(accL);
-  const vocalsR = stft.finish(accR);
+  const vocal = stft.finish(accVocal);
+  const vocalsL = new Float64Array(length);
+  const vocalsR = new Float64Array(length);
   const instrumentalL = new Float64Array(length);
   const instrumentalR = new Float64Array(length);
+  const g = opts.overSubtraction;
   for (let i = 0; i < length; i++) {
-    instrumentalL[i] = left[i] - vocalsL[i];
-    instrumentalR[i] = right[i] - vocalsR[i];
+    // A centre-panned lead is by definition the same in both channels, so the vocal
+    // stem is that one signal on both sides rather than two separately masked ones.
+    const v = vocal[i];
+    vocalsL[i] = v;
+    vocalsR[i] = v;
+    instrumentalL[i] = left[i] - g * v;
+    instrumentalR[i] = right[i] - g * v;
   }
 
   return {

@@ -106,3 +106,81 @@ test('transposing by an octave comes back to the same key', async () => {
   const { transposeKey } = await import('../src/dsp/analyze.js');
   assert.equal(transposeKey('A', 'minor', 12).name, 'A minor');
 });
+
+/* ---------- choosing a key to play in ---------- */
+
+test('a mode offers all twelve tonics, spelled the way each key is written', async () => {
+  const { keysInMode } = await import('../src/dsp/analyze.js');
+
+  const major = keysInMode('major');
+  assert.equal(major.length, 12);
+  assert.ok(major.includes('C') && major.includes('G'), 'C and G major should both be offered');
+  assert.ok(major.includes('Db'), 'Db major is written with flats, not as C#');
+
+  const minor = keysInMode('minor');
+  assert.equal(minor.length, 12);
+  assert.ok(minor.includes('Eb'), 'Eb minor is written with flats');
+});
+
+test('the distance between two tonics takes the shorter way round', async () => {
+  const { semitonesBetween } = await import('../src/dsp/analyze.js');
+
+  // C to G is a fifth up or a fourth down. Both land on G, and moving five semitones
+  // puts the audio through less of a stretch than moving seven.
+  assert.equal(semitonesBetween('C', 'G'), -5);
+  assert.equal(semitonesBetween('C', 'D'), 2);
+  assert.equal(semitonesBetween('C', 'B'), -1);
+  assert.equal(semitonesBetween('C', 'C'), 0);
+  assert.equal(semitonesBetween('G', 'C'), 5);
+  assert.ok(Math.abs(semitonesBetween('C', 'F#')) === 6, 'a tritone is six either way');
+});
+
+test('every shift the chooser can ask for lands on the key it named', async () => {
+  const { keysInMode, semitonesBetween, transposeKey } = await import('../src/dsp/analyze.js');
+
+  for (const mode of ['major', 'minor']) {
+    for (const from of keysInMode(mode)) {
+      for (const to of keysInMode(mode)) {
+        const landed = transposeKey(from, mode, semitonesBetween(from, to));
+        assert.equal(landed.tonic, to, `${from} ${mode} -> ${to} ${mode} landed on ${landed.tonic}`);
+      }
+    }
+  }
+});
+
+test('choosing a new key actually moves the audio into it', async () => {
+  // The whole point of the feature, checked on the audio rather than on the label:
+  // detect the key, ask for a different one, shift the samples, and detect again.
+  const { keysInMode, semitonesBetween } = await import('../src/dsp/analyze.js');
+  const { transform } = await import('../src/dsp/phasevocoder.js');
+
+  const rate = 22050;
+  const seconds = 6;
+  const samples = new Float64Array(rate * seconds);
+  // A I-IV-V-vi progression in C major, held a bar each.
+  const chords = [[261.63, 329.63, 392.0], [349.23, 440.0, 523.25],
+                  [392.0, 493.88, 587.33], [440.0, 523.25, 659.26]];
+  const phase = [0, 0, 0];
+  for (let i = 0; i < samples.length; i++) {
+    const chord = chords[Math.floor((i / rate) / 1.5) % 4];
+    let s = 0;
+    for (let c = 0; c < 3; c++) {
+      phase[c] += (2 * Math.PI * chord[c]) / rate;
+      s += Math.sin(phase[c]) + 0.4 * Math.sin(2 * phase[c]);
+    }
+    samples[i] = 0.25 * s;
+  }
+
+  const detected = detectKey(samples, rate);
+  assert.equal(detected.tonic, 'C', `expected C, detected ${detected.name}`);
+
+  for (const target of keysInMode(detected.mode)) {
+    const semitones = semitonesBetween(detected.tonic, target);
+    const shifted = semitones === 0 ? samples : transform(samples, semitones, 1);
+    const after = detectKey(shifted, rate);
+    assert.equal(
+      after.tonic, target,
+      `asked for ${target}, shifted by ${semitones}, but the audio came out in ${after.name}`
+    );
+  }
+});

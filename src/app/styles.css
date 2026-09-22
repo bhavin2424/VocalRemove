@@ -224,6 +224,52 @@ main { max-width: 1120px; margin: 0 auto; padding: 1.5rem; }
 .control-actions { display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem; flex-wrap: wrap; }
 .control-note { color: var(--muted); font-size: 0.85rem; }
 
+/* Sits under the slider it belongs to, indented past the label column. */
+.control-hint {
+  margin: -0.4rem 0 1.1rem;
+  padding-left: 8rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  max-width: 54ch;
+}
+
+.control-warning {
+  margin: -0.4rem 0 1.1rem;
+  padding: 0.6rem 0.9rem 0.6rem calc(8rem - 0.9rem);
+  border-left: 3px solid var(--vocals);
+  background: rgba(232, 163, 61, 0.08);
+  color: var(--text);
+  font-size: 0.85rem;
+  max-width: 62ch;
+}
+
+/* ---------- key chooser ---------- */
+
+.key-target {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.key-target label { font-size: 0.9rem; color: var(--muted); }
+
+.key-target select {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+}
+
+.key-target select:hover { border-color: var(--muted); }
+.key-target-note { color: var(--muted); font-size: 0.82rem; }
+
 /* ---------- downloads ---------- */
 
 .downloads { display: flex; gap: 0.75rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); flex-wrap: wrap; }
@@ -242,6 +288,8 @@ main { max-width: 1120px; margin: 0 auto; padding: 1.5rem; }
   .console { grid-template-columns: 1fr; }
   .control { grid-template-columns: 1fr; gap: 0.35rem; }
   .control output { text-align: left; }
+  .control-hint { padding-left: 0; }
+  .control-warning { padding-left: 0.9rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -78,3 +78,81 @@ test('transform with no change returns the same length', async () => {
   const { transform } = await import('../src/dsp/phasevocoder.js');
   assert.equal(transform(tone(440), 0, 1).length, N);
 });
+
+/** Pearson correlation between two channels: how tightly the image holds together. */
+function correlation(a, b) {
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < a.length; i++) { num += a[i] * b[i]; da += a[i] * a[i]; db += b[i] * b[i]; }
+  return num / Math.sqrt(da * db || 1e-12);
+}
+
+function rms(x) {
+  let s = 0;
+  for (const v of x) s += v * v;
+  return Math.sqrt(s / x.length);
+}
+
+/** A stereo pair that is the same source with one side delayed, as any record is. */
+function stereoPair() {
+  const mono = tone(330, N * 2);
+  const delay = Math.round(0.011 * SR);
+  const left = Float64Array.from(mono);
+  const right = new Float64Array(mono.length);
+  for (let i = 0; i < mono.length; i++) {
+    right[i] = mono[i] + (i >= delay ? 0.25 * mono[i - delay] : 0);
+  }
+  return { left, right };
+}
+
+test('shifting a stereo pair together holds the image where it was', async () => {
+  const { transformChannels } = await import('../src/dsp/phasevocoder.js');
+  const { left, right } = stereoPair();
+  const before = correlation(left, right);
+
+  for (const semitones of [4, 7, 12]) {
+    const [l, r] = transformChannels([left, right], semitones, 1);
+    const after = correlation(l, r);
+    assert.ok(
+      Math.abs(after - before) < 0.05,
+      `${semitones} semitones moved the channel correlation from ${before.toFixed(3)} to ${after.toFixed(3)}`
+    );
+  }
+});
+
+test('shifting the channels apart is what smears the image', async () => {
+  // The reason the stereo path exists at all. Running one vocoder per channel lets
+  // their phases drift independently and the image widens and wanders.
+  const { transformChannels, transform } = await import('../src/dsp/phasevocoder.js');
+  const { left, right } = stereoPair();
+  const before = correlation(left, right);
+
+  const apart = correlation(transform(left, 7, 1), transform(right, 7, 1));
+  const [tl, tr] = transformChannels([left, right], 7, 1);
+  const together = correlation(tl, tr);
+
+  assert.ok(
+    Math.abs(together - before) < Math.abs(apart - before),
+    `linked shifting (${together.toFixed(3)}) was no better than independent (${apart.toFixed(3)}) against ${before.toFixed(3)}`
+  );
+});
+
+test('shifting does not change how loud the audio is', () => {
+  // Formant correction reshapes the spectrum, and without a makeup gain it doubles as
+  // a volume control: an octave up used to arrive more than ten decibels down.
+  const source = tone(440, N * 2);
+  const level = rms(source);
+  for (const semitones of [-12, -7, -3, 3, 7, 12]) {
+    const out = rms(pitchShift(source, semitones));
+    const drift = 20 * Math.log10(out / level);
+    assert.ok(Math.abs(drift) < 1.5, `${semitones} semitones changed the level by ${drift.toFixed(1)} dB`);
+  }
+});
+
+test('the full range from minus twelve to plus twelve semitones is supported', () => {
+  const source = tone(440, N);
+  for (let semitones = -12; semitones <= 12; semitones++) {
+    const out = pitchShift(source, semitones);
+    assert.equal(out.length, N, `${semitones} semitones changed the duration`);
+    assert.ok(Number.isFinite(rms(out)) && rms(out) > 0.05, `${semitones} semitones produced no signal`);
+  }
+});

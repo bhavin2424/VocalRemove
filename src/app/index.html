@@ -88,6 +88,11 @@
           <p class="key-name" id="key-name">&mdash;</p>
           <p class="key-confidence" id="key-confidence"></p>
           <ul class="scale-row" id="scale-row"></ul>
+          <div class="key-target">
+            <label for="target-key">Play in</label>
+            <select id="target-key"></select>
+            <span class="key-target-note" id="key-target-note"></span>
+          </div>
           <div class="facts">
             <div>
               <div class="fact-value" id="fact-bpm">&mdash;</div>
@@ -107,10 +112,13 @@
       <h2>Adjust</h2>
 
       <div class="control">
-        <label for="transpose">Transpose</label>
-        <input type="range" id="transpose" min="-12" max="12" step="1" value="0">
-        <output id="transpose-out">0</output>
+        <label for="pitch">Pitch shift</label>
+        <input type="range" id="pitch" min="-12" max="12" step="1" value="0"
+               aria-describedby="pitch-warning">
+        <output id="pitch-out">0 semitones</output>
       </div>
+      <p class="control-warning" id="pitch-warning" role="status" hidden></p>
+      <p class="control-hint">Pitch and tempo are independent: shifting the key leaves the BPM alone.</p>
 
       <div class="control">
         <label for="tempo">Tempo</label>
@@ -119,10 +127,14 @@
       </div>
 
       <div class="control">
-        <label for="strength">Split strength</label>
-        <input type="range" id="strength" min="5" max="60" step="1" value="25">
-        <output id="strength-out">25</output>
+        <label for="strength">Vocal removal</label>
+        <input type="range" id="strength" min="0" max="100" step="1" value="85">
+        <output id="strength-out">85</output>
       </div>
+      <p class="control-hint">
+        Higher strips more of the lead and takes more of the centre of the mix with it.
+        Lower keeps the backing track fuller and leaves a little more of the singer.
+      </p>
 
       <div class="control-actions">
         <button type="button" class="button button-primary" id="apply" disabled>Apply changes</button>

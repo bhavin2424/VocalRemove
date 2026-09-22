@@ -28,13 +28,16 @@ const ui = {
   keyName: el('key-name'),
   keyConfidence: el('key-confidence'),
   scaleRow: el('scale-row'),
+  targetKey: el('target-key'),
+  keyTargetNote: el('key-target-note'),
   factBpm: el('fact-bpm'),
   factDuration: el('fact-duration'),
 
   strength: el('strength'),
   strengthOut: el('strength-out'),
-  transpose: el('transpose'),
-  transposeOut: el('transpose-out'),
+  pitch: el('pitch'),
+  pitchOut: el('pitch-out'),
+  pitchWarning: el('pitch-warning'),
   tempo: el('tempo'),
   tempoOut: el('tempo-out'),
   apply: el('apply'),
@@ -53,9 +56,12 @@ const state = {
   sampleRate: 44100,
   source: null,      // the decoded original, as stereo floats
   separated: null,   // stems straight out of the separator
-  rendered: null,    // stems after transpose and tempo, what you hear
+  rendered: null,    // stems after the pitch and tempo change, what you hear
   key: null,
-  appliedStrength: 2,
+  tempo: null,
+  appliedStrength: null,
+  renderedPitch: 0,
+  renderedTempo: 100,
 };
 
 const MIX_PRESETS = {
@@ -64,13 +70,16 @@ const MIX_PRESETS = {
   acapella: { vocals: 1, instrumental: 0 },
 };
 
+/** Past this many semitones the stretch is far enough to hear. */
+const LARGE_SHIFT = 7;
+
 /**
  * Drive a DSP generator without freezing the page.
  *
- * A file:// page cannot spawn a Worker, so the only way to keep the interface
- * alive during a minute of signal processing is to hand control back to the
- * browser every so often. Yielding on elapsed time rather than a fixed step
- * count keeps that responsive whatever the machine's speed.
+ * A file:// page cannot spawn a Worker, so the only way to keep the interface alive
+ * during a minute of signal processing is to hand control back to the browser every
+ * so often. Yielding on elapsed time rather than a fixed step count keeps that
+ * responsive whatever the machine's speed.
  */
 async function run(steps, label) {
   ui.progressLabel.textContent = label;
@@ -96,9 +105,26 @@ function showStage(stage) {
   ui.workspace.hidden = stage !== 'ready';
 }
 
+/**
+ * The slider reads as "how hard to push"; the engine wants three numbers, and they
+ * only make sense moved together.
+ *
+ * Pushing harder sharpens the mask, takes more of the vocal estimate back out of the
+ * backing track, and eases off the protection that holds centre-panned chords in
+ * place. That last one is the real cost. Keys and rhythm guitars sit in the middle of
+ * the mix exactly where the voice does, so scrubbing the voice harder always takes
+ * some of them with it, and this slider is where that trade is made.
+ */
 function separationOptions() {
-  // The slider reads as "how hard to push"; the engine wants a mask exponent.
-  return { exponent: 1 + Number(ui.strength.value) * 0.04 };
+  const push = Number(ui.strength.value) / 100;
+  return {
+    exponent: 1.4 + push * 2.0,
+    // Held deliberately short of the point where the subtraction overshoots. Past
+    // that the residual crosses through silence and comes back up phase-inverted, so
+    // the top of the slider would remove less of the singer than the middle of it.
+    overSubtraction: 1 + push * 0.45,
+    sustainedSubtraction: 0.75 - push * 0.25,
+  };
 }
 
 async function loadFile(file) {
@@ -119,12 +145,17 @@ async function loadFile(file) {
   state.name = file.name;
   state.sampleRate = buffer.sampleRate;
   state.source = toStereo(buffer);
+  ui.pitch.value = '0';
+  ui.tempo.value = '100';
 
   await separateCurrent();
   await analyseCurrent();
+  populateKeyChoices();
   await renderCurrent();
 
   ui.trackName.textContent = state.name;
+  rememberRenderSettings();
+  markPendingChanges();
   showStage('ready');
   applyMix();
 }
@@ -133,7 +164,7 @@ async function separateCurrent() {
   const { left, right } = state.source;
   const result = await run(
     separateSteps(left, right, state.sampleRate, separationOptions()),
-    'Separating vocals from the backing track'
+    'Separating the vocals from the backing track'
   );
   state.separated = result;
   state.appliedStrength = Number(ui.strength.value);
@@ -144,32 +175,37 @@ async function analyseCurrent() {
   ui.progressLabel.textContent = 'Finding the key and tempo';
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  // Read the key off the instrumental: vocal vibrato blurs the chroma.
+  // Read the key off the backing track: vocal vibrato blurs the chroma.
   const instrumental = state.separated.instrumental;
   const analysis = monoForAnalysis(instrumental.left, instrumental.right, state.sampleRate);
   state.key = detectKey(analysis.samples, analysis.sampleRate);
   state.tempo = detectTempo(analysis.samples, analysis.sampleRate);
 }
 
-/** Apply the current transpose and tempo, and rebuild everything downstream. */
+/** Apply the current pitch shift and tempo, and rebuild everything downstream. */
 async function renderCurrent() {
-  const semitones = Number(ui.transpose.value);
+  const semitones = Number(ui.pitch.value);
   const tempoFactor = Number(ui.tempo.value) / 100;
   const stems = state.separated;
 
   if (semitones === 0 && tempoFactor === 1) {
     state.rendered = { vocals: stems.vocals, instrumental: stems.instrumental };
   } else {
-    const label = 'Transposing and stretching';
-    const vocals = {
-      left: await run(transformSteps(stems.vocals.left, semitones, tempoFactor), label),
-      right: await run(transformSteps(stems.vocals.right, semitones, tempoFactor), label),
+    const label = semitones === 0 ? 'Changing the tempo' : 'Changing the key';
+    // Both channels of a stem go through in one call, so the vocoder can rotate them
+    // by a single shared phase correction and leave the stereo image where it was.
+    const [vocalsL, vocalsR] = await run(
+      transformChannelsSteps([stems.vocals.left, stems.vocals.right], semitones, tempoFactor),
+      label
+    );
+    const [instrumentalL, instrumentalR] = await run(
+      transformChannelsSteps([stems.instrumental.left, stems.instrumental.right], semitones, tempoFactor),
+      label
+    );
+    state.rendered = {
+      vocals: { left: vocalsL, right: vocalsR },
+      instrumental: { left: instrumentalL, right: instrumentalR },
     };
-    const instrumental = {
-      left: await run(transformSteps(stems.instrumental.left, semitones, tempoFactor), label),
-      right: await run(transformSteps(stems.instrumental.right, semitones, tempoFactor), label),
-    };
-    state.rendered = { vocals, instrumental };
   }
 
   const rate = state.sampleRate;
@@ -177,7 +213,7 @@ async function renderCurrent() {
   const instrumentalBuffer = toAudioBuffer(state.rendered.instrumental.left, state.rendered.instrumental.right, rate);
 
   if (!player) {
-    player = new StemPlayer(vocalBuffer.context || audioContext());
+    player = new StemPlayer(audioContext());
     player.onEnded = () => {
       ui.play.textContent = 'Play';
       view.setPosition(0);
@@ -199,8 +235,89 @@ async function renderCurrent() {
   applyMix();
 }
 
+/*
+ * Renders are long, and the controls that start one are sliders somebody is dragging.
+ * Rather than queue up a render per nudge, a request that arrives mid-render just
+ * marks that another is wanted, and the loop picks up the settings as they finally
+ * stand once the current pass finishes.
+ */
+let rendering = false;
+let renderWanted = false;
+
+async function requestRender() {
+  if (!state.separated) return;
+  if (rendering) {
+    renderWanted = true;
+    return;
+  }
+
+  rendering = true;
+  const wasPlaying = player && player.playing;
+  if (player) player.pause();
+  ui.play.textContent = 'Play';
+
+  try {
+    do {
+      renderWanted = false;
+      showStage('working');
+      ui.progressBar.style.width = '0%';
+      await renderCurrent();
+    } while (renderWanted);
+  } finally {
+    rendering = false;
+    rememberRenderSettings();
+    markPendingChanges();
+    showStage('ready');
+    if (wasPlaying) {
+      player.play();
+      ui.play.textContent = 'Pause';
+    }
+  }
+}
+
+/** Fill the key menu with the twelve tonics of the detected mode. */
+function populateKeyChoices() {
+  const mode = state.key.mode;
+  ui.targetKey.replaceChildren(...keysInMode(mode).map((tonic) => {
+    const option = document.createElement('option');
+    option.value = tonic;
+    option.textContent = `${tonic} ${mode}`;
+    return option;
+  }));
+  syncKeyChoice();
+}
+
+/** Point the key menu at whatever key the current pitch shift actually lands on. */
+function syncKeyChoice() {
+  if (!state.key) return;
+  const semitones = Number(ui.pitch.value);
+  const landing = semitones === 0
+    ? state.key
+    : transposeKey(state.key.tonic, state.key.mode, semitones);
+  ui.targetKey.value = landing.tonic;
+  ui.keyTargetNote.textContent = semitones === 0
+    ? 'as recorded'
+    : `${semitones > 0 ? 'up' : 'down'} ${Math.abs(semitones)} ` +
+      `${Math.abs(semitones) === 1 ? 'semitone' : 'semitones'} from ${state.key.name}`;
+}
+
+function paintPitchControl() {
+  const semitones = Number(ui.pitch.value);
+  const sign = semitones > 0 ? '+' : '';
+  const unit = Math.abs(semitones) === 1 ? 'semitone' : 'semitones';
+  ui.pitchOut.textContent = `${sign}${semitones} ${unit}`;
+
+  const large = Math.abs(semitones) >= LARGE_SHIFT;
+  ui.pitchWarning.hidden = !large;
+  ui.pitchWarning.textContent = large
+    ? `${Math.abs(semitones)} semitones is a long way to move a recording. The further it ` +
+      'goes the more the audio is stretched and resampled, so expect it to soften, and ' +
+      'to hear some smearing on drums and cymbals. Smaller shifts hold up better.'
+    : '';
+}
+
 function paintReadout() {
-  const semitones = Number(ui.transpose.value);
+  const semitones = Number(ui.pitch.value);
   const key = semitones === 0
     ? state.key
     : transposeKey(state.key.tonic, state.key.mode, semitones);
@@ -208,7 +325,7 @@ function paintReadout() {
   ui.keyName.textContent = key.name;
   ui.keyConfidence.textContent = semitones === 0
     ? `Detected with ${(state.key.confidence * 100).toFixed(0)}% confidence`
-    : `${state.key.name} transposed by ${semitones > 0 ? '+' : ''}${semitones}`;
+    : `${state.key.name} shifted by ${semitones > 0 ? '+' : ''}${semitones}`;
 
   ui.scaleRow.replaceChildren(...key.notes.map((note) => {
     const li = document.createElement('li');
@@ -216,6 +333,8 @@ function paintReadout() {
     return li;
   }));
 
+  // The vocoder holds the tempo through a pitch shift, so the BPM only follows the
+  // tempo control.
   const bpm = state.tempo.bpm * (Number(ui.tempo.value) / 100);
   ui.factBpm.textContent = bpm.toFixed(0);
   ui.factDuration.textContent = formatTime(player ? player.duration : 0);
@@ -245,17 +364,20 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
+/**
+ * Only the vocal removal strength needs the Apply button. It changes the separation
+ * itself, which means running the whole analysis again; pitch and tempo only restage
+ * stems that are already separated, so they apply themselves as soon as the slider
+ * is let go.
+ */
 function markPendingChanges() {
-  const changed =
-    Number(ui.strength.value) !== state.appliedStrength ||
-    Number(ui.transpose.value) !== state.renderedTranspose ||
-    Number(ui.tempo.value) !== state.renderedTempo;
+  const changed = state.separated !== null && Number(ui.strength.value) !== state.appliedStrength;
   ui.apply.disabled = !changed;
   ui.applyNote.textContent = changed ? 'Not applied yet' : '';
 }
 
 function rememberRenderSettings() {
-  state.renderedTranspose = Number(ui.transpose.value);
+  state.renderedPitch = Number(ui.pitch.value);
   state.renderedTempo = Number(ui.tempo.value);
 }
 
@@ -329,44 +451,63 @@ for (const preset of ui.presets) {
   });
 }
 
+// Choosing a key sets the pitch shift that lands on it, taking the shorter of the
+// two ways round.
+ui.targetKey.addEventListener('change', () => {
+  if (!state.key) return;
+  ui.pitch.value = String(semitonesBetween(state.key.tonic, ui.targetKey.value));
+  paintPitchControl();
+  syncKeyChoice();
+  requestRender();
+});
+
+ui.pitch.addEventListener('input', () => {
+  paintPitchControl();
+  syncKeyChoice();
+});
+ui.pitch.addEventListener('change', () => requestRender());
+
+ui.tempo.addEventListener('input', () => {
+  ui.tempoOut.textContent = ui.tempo.value + '%';
+});
+ui.tempo.addEventListener('change', () => requestRender());
+
 ui.strength.addEventListener('input', () => {
   ui.strengthOut.textContent = ui.strength.value;
   markPendingChanges();
 });
-ui.transpose.addEventListener('input', () => {
-  const v = Number(ui.transpose.value);
-  ui.transposeOut.textContent = v > 0 ? '+' + v : String(v);
-  markPendingChanges();
-});
-ui.tempo.addEventListener('input', () => {
-  ui.tempoOut.textContent = ui.tempo.value + '%';
-  markPendingChanges();
-});
 
 ui.apply.addEventListener('click', async () => {
+  if (!state.source || rendering) return;
   const wasPlaying = player && player.playing;
   if (player) player.pause();
   ui.play.textContent = 'Play';
   showStage('working');
   ui.progressBar.style.width = '0%';
 
-  if (Number(ui.strength.value) !== state.appliedStrength) {
+  rendering = true;
+  try {
     await separateCurrent();
     await analyseCurrent();
-  }
-  await renderCurrent();
-  rememberRenderSettings();
-  markPendingChanges();
-  showStage('ready');
-  if (wasPlaying) {
-    player.play();
-    ui.play.textContent = 'Pause';
+    populateKeyChoices();
+    await renderCurrent();
+  } finally {
+    rendering = false;
+    rememberRenderSettings();
+    markPendingChanges();
+    showStage('ready');
+    if (wasPlaying) {
+      player.play();
+      ui.play.textContent = 'Pause';
+    }
   }
 });
 
 function stemFilename(suffix) {
   const base = state.name.replace(/\.[^.]+$/, '') || 'track';
-  return `${base} - ${suffix}.wav`;
+  const semitones = Number(ui.pitch.value);
+  const key = semitones === 0 ? '' : ` (${transposeKey(state.key.tonic, state.key.mode, semitones).name})`;
+  return `${base} - ${suffix}${key}.wav`;
 }
 
 ui.downloadVocals.addEventListener('click', () => {
@@ -399,6 +540,7 @@ window.addEventListener('resize', () => {
   }
 });
 
+paintPitchControl();
 rememberRenderSettings();
 markPendingChanges();
 showStage('idle');

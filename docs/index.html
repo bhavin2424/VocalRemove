@@ -231,6 +231,52 @@ main { max-width: 1120px; margin: 0 auto; padding: 1.5rem; }
 .control-actions { display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem; flex-wrap: wrap; }
 .control-note { color: var(--muted); font-size: 0.85rem; }
 
+/* Sits under the slider it belongs to, indented past the label column. */
+.control-hint {
+  margin: -0.4rem 0 1.1rem;
+  padding-left: 8rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  max-width: 54ch;
+}
+
+.control-warning {
+  margin: -0.4rem 0 1.1rem;
+  padding: 0.6rem 0.9rem 0.6rem calc(8rem - 0.9rem);
+  border-left: 3px solid var(--vocals);
+  background: rgba(232, 163, 61, 0.08);
+  color: var(--text);
+  font-size: 0.85rem;
+  max-width: 62ch;
+}
+
+/* ---------- key chooser ---------- */
+
+.key-target {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.key-target label { font-size: 0.9rem; color: var(--muted); }
+
+.key-target select {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+}
+
+.key-target select:hover { border-color: var(--muted); }
+.key-target-note { color: var(--muted); font-size: 0.82rem; }
+
 /* ---------- downloads ---------- */
 
 .downloads { display: flex; gap: 0.75rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); flex-wrap: wrap; }
@@ -249,6 +295,8 @@ main { max-width: 1120px; margin: 0 auto; padding: 1.5rem; }
   .console { grid-template-columns: 1fr; }
   .control { grid-template-columns: 1fr; gap: 0.35rem; }
   .control output { text-align: left; }
+  .control-hint { padding-left: 0; }
+  .control-warning { padding-left: 0.9rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -336,6 +384,11 @@ main { max-width: 1120px; margin: 0 auto; padding: 1.5rem; }
           <p class="key-name" id="key-name">&mdash;</p>
           <p class="key-confidence" id="key-confidence"></p>
           <ul class="scale-row" id="scale-row"></ul>
+          <div class="key-target">
+            <label for="target-key">Play in</label>
+            <select id="target-key"></select>
+            <span class="key-target-note" id="key-target-note"></span>
+          </div>
           <div class="facts">
             <div>
               <div class="fact-value" id="fact-bpm">&mdash;</div>
@@ -355,10 +408,13 @@ main { max-width: 1120px; margin: 0 auto; padding: 1.5rem; }
       <h2>Adjust</h2>
 
       <div class="control">
-        <label for="transpose">Transpose</label>
-        <input type="range" id="transpose" min="-12" max="12" step="1" value="0">
-        <output id="transpose-out">0</output>
+        <label for="pitch">Pitch shift</label>
+        <input type="range" id="pitch" min="-12" max="12" step="1" value="0"
+               aria-describedby="pitch-warning">
+        <output id="pitch-out">0 semitones</output>
       </div>
+      <p class="control-warning" id="pitch-warning" role="status" hidden></p>
+      <p class="control-hint">Pitch and tempo are independent: shifting the key leaves the BPM alone.</p>
 
       <div class="control">
         <label for="tempo">Tempo</label>
@@ -367,10 +423,14 @@ main { max-width: 1120px; margin: 0 auto; padding: 1.5rem; }
       </div>
 
       <div class="control">
-        <label for="strength">Split strength</label>
-        <input type="range" id="strength" min="5" max="60" step="1" value="25">
-        <output id="strength-out">25</output>
+        <label for="strength">Vocal removal</label>
+        <input type="range" id="strength" min="0" max="100" step="1" value="85">
+        <output id="strength-out">85</output>
       </div>
+      <p class="control-hint">
+        Higher strips more of the lead and takes more of the centre of the mix with it.
+        Lower keeps the backing track fuller and leaves a little more of the singer.
+      </p>
 
       <div class="control-actions">
         <button type="button" class="button button-primary" id="apply" disabled>Apply changes</button>
@@ -562,35 +622,93 @@ class STFT {
 const SEPARATION_DEFAULTS = {
   frameSize: 4096,
   hopSize: 1024,
-  /** Mask steepness. Higher pulls more borderline content out of the vocal stem. */
+  /** Mask steepness. Higher drives borderline bins towards fully in or fully out. */
   exponent: 2,
-  /** Below this, content is treated as bass and kept in the instrumental. */
+  /** Below this, content is treated as bass and kept in the backing track. */
   lowCutHz: 180,
   /** Above this, content is treated as cymbals and air, and kept likewise. */
   highCutHz: 10000,
+  /**
+   * How hard panned content is subtracted off the centre estimate. Above 1 this is
+   * deliberate over-subtraction: it costs a little vocal-stem quality and buys a
+   * noticeably cleaner backing track, which is the trade a karaoke track wants.
+   */
+  sideSubtraction: 1.35,
+  /** How hard broadband content is subtracted, which is what protects the drums. */
+  percussiveSubtraction: 1,
+  /**
+   * How hard sustained content is subtracted, which is what protects centre-panned
+   * keys, pads and guitars. Stereo position cannot tell those from a lead vocal --
+   * they are all dead centre -- so without this the accompaniment is gutted along
+   * with the voice and the backing track comes out hollow.
+   */
+  sustainedSubtraction: 0.5,
+  /**
+   * Gain on the vocal estimate when it is removed from the backing track. At 1 the
+   * two stems sum back to the input exactly; above 1 the backing track is scrubbed
+   * harder at the cost of that guarantee.
+   */
+  overSubtraction: 1,
 };
 
 /**
- * How centred a frequency bin is, from the two channel spectra.
+ * Width of the broadband floor estimate, as taps and the bin stride between them.
  *
- *   2 * Re(L * conj(R)) / (|L|^2 + |R|^2)
- *
- * One expression covering both things that matter: it reaches 1 only when the
- * two channels agree in phase AND in magnitude, falls to 0 when either channel
- * is silent, and goes negative for out-of-phase content. Lead vocals sit near
- * 1 because they are almost always mixed dead centre.
+ * Nine taps two bins apart span +/-8 bins, which at 4096 clears the four-bin main
+ * lobe a windowed sine occupies. So a tonal peak sees a floor drawn from its far
+ * skirt -- near zero, no penalty -- while a drum hit, broadband by nature, sees a
+ * floor as tall as itself and is held out of the vocal stem.
  */
-function centredness(lre, lim, rre, rim) {
-  const dot = lre * rre + lim * rim;
-  const energy = lre * lre + lim * lim + rre * rre + rim * rim;
-  if (energy < 1e-20) return 0;
-  return (2 * dot) / energy;
+const FLOOR_TAPS = 9;
+const FLOOR_STRIDE = 2;
+
+/**
+ * Width of the sustained estimate, as taps and the frame stride between them.
+ *
+ * Eleven taps four frames apart reach +/-20 frames, which at 1024 is a little under
+ * half a second either side. Held notes sit still for that long and read as
+ * accompaniment; a sung line, with its vibrato and its movement between notes, does
+ * not hold any one bin for half a second and reads as voice.
+ */
+const TIME_TAPS = 11;
+const TIME_STRIDE = 4;
+const TIME_REACH = ((TIME_TAPS - 1) >> 1) * TIME_STRIDE;
+
+/** Median of `count` values gathered in `scratch`, sorted in place. */
+function medianOf(scratch, count) {
+  for (let a = 1; a < count; a++) {
+    const v = scratch[a];
+    let b = a - 1;
+    while (b >= 0 && scratch[b] > v) { scratch[b + 1] = scratch[b]; b--; }
+    scratch[b + 1] = v;
+  }
+  return scratch[count >> 1];
 }
 
 /**
- * Band weighting. Bass and kick drums are mixed dead centre too, so centredness
- * alone would drag them into the vocal stem and leave a hollow instrumental.
- * Raised-cosine edges avoid audible ringing at the transitions.
+ * Median magnitude around each bin: an estimate of the broadband floor under it.
+ *
+ * A median rather than a mean, because a mean is dragged up by the very peak we are
+ * trying to measure the floor beneath.
+ */
+function broadbandFloor(mag, half, out, scratch) {
+  const centre = (FLOOR_TAPS - 1) >> 1;
+  for (let k = 0; k <= half; k++) {
+    for (let t = 0; t < FLOOR_TAPS; t++) {
+      // Reflect at the band edges so the first and last bins get a real window.
+      let idx = k + (t - centre) * FLOOR_STRIDE;
+      if (idx < 0) idx = -idx;
+      if (idx > half) idx = 2 * half - idx;
+      scratch[t] = mag[idx];
+    }
+    out[k] = medianOf(scratch, FLOOR_TAPS);
+  }
+}
+
+/**
+ * Band weighting. Bass and kick drums are mixed dead centre too, so a centre
+ * estimate alone would drag them into the vocal stem and leave a hollow backing
+ * track. Raised-cosine edges avoid audible ringing at the transitions.
  */
 function bandWeight(freq, lowCut, highCut) {
   const lowEnd = lowCut * 1.6;
@@ -602,13 +720,9 @@ function bandWeight(freq, lowCut, highCut) {
 }
 
 function buildBandWeights(frameSize, sampleRate, lowCut, highCut) {
-  const w = new Float64Array(frameSize);
   const half = frameSize >> 1;
-  for (let k = 0; k <= half; k++) {
-    const weight = bandWeight((k * sampleRate) / frameSize, lowCut, highCut);
-    w[k] = weight;
-    if (k > 0 && k < half) w[frameSize - k] = weight;
-  }
+  const w = new Float64Array(half + 1);
+  for (let k = 0; k <= half; k++) w[k] = bandWeight((k * sampleRate) / frameSize, lowCut, highCut);
   return w;
 }
 
@@ -625,16 +739,39 @@ function isMono(left, right) {
 }
 
 /**
- * Split a stereo track into a vocal stem and an instrumental stem.
+ * Split a stereo track into a vocal stem and a backing track.
  *
- * Only the vocal stem is synthesised; the instrumental is the original minus
- * that. Overlap-add is linear, so the subtraction yields exactly what masking
- * with (1 - mask) would have produced, for half the inverse transforms, and it
- * makes the two stems sum back to the original bit for bit.
+ * The mix is read as mid and side rather than left and right, and each bin of the
+ * mid is asked three questions at once. How much of it is panned away from centre,
+ * measured directly as the side magnitude. How much of it is broadband, measured as
+ * the median across neighbouring bins, which is what a drum looks like. How much of
+ * it is holding still, measured as the median across neighbouring frames, which is
+ * what a held chord looks like. Whatever is left over is centred, tonal and moving,
+ * and that is a lead vocal:
  *
- * Exposed as a generator that yields a 0..1 progress fraction. A file:// page
- * cannot spawn a Worker, so the browser drives this loop in slices to stay
- * responsive; `separate` below drives it straight through.
+ *   vocal ~= |mid| - sideSubtraction * |side|
+ *                  - max(percussiveSubtraction * broadband, sustainedSubtraction * sustained)
+ *
+ * The last term is the one that matters most in practice. Keys, pads and rhythm
+ * guitars are mixed dead centre just like the voice, so stereo position alone cannot
+ * separate them and a centre-extraction engine strips them out along with the vocal,
+ * which is what leaves a karaoke track sounding hollow. Time structure can separate
+ * them, because a held chord occupies one bin for half a second and a sung phrase
+ * never does.
+ *
+ * Subtraction rather than a correlation ratio is the other half of it. A correlation
+ * between the channels collapses as soon as a panned instrument shares a bin with the
+ * voice, so the mask goes soft exactly where the voice is loudest and the lead
+ * survives into the backing track. Subtraction stays accurate there.
+ *
+ * Only the vocal stem is synthesised, as a true centre signal. The backing track is
+ * the input minus that, which leaves the entire side signal untouched, so panned
+ * instruments come through exactly as they were recorded and the stereo image is
+ * preserved rather than rebuilt.
+ *
+ * Exposed as a generator that yields a 0..1 progress fraction. A file:// page cannot
+ * spawn a Worker, so the browser drives this loop in slices to stay responsive;
+ * `separate` below drives it straight through.
  */
 function* separateSteps(left, right, sampleRate, options = {}) {
   const opts = { ...SEPARATION_DEFAULTS, ...options };
@@ -642,42 +779,111 @@ function* separateSteps(left, right, sampleRate, options = {}) {
   const stft = new STFT(opts.frameSize, opts.hopSize);
   const band = buildBandWeights(opts.frameSize, sampleRate, opts.lowCutHz, opts.highCutHz);
 
-  const lre = new Float64Array(opts.frameSize);
-  const lim = new Float64Array(opts.frameSize);
-  const rre = new Float64Array(opts.frameSize);
-  const rim = new Float64Array(opts.frameSize);
-
-  const accL = stft.createAccumulator(length);
-  const accR = stft.createAccumulator(length);
+  const n = opts.frameSize;
+  const half = n >> 1;
+  const bins = half + 1;
   const frames = stft.frameCount(length);
 
-  for (let f = 0; f < frames; f++) {
-    stft.analyzeFrame(left, f, lre, lim);
-    stft.analyzeFrame(right, f, rre, rim);
+  // The sustained estimate needs frames from either side of the one being written,
+  // so analysis runs ahead of synthesis and the frames in between wait in a ring.
+  const ring = 2 * TIME_REACH + 1;
+  const midRe = new Float64Array(ring * n);
+  const midIm = new Float64Array(ring * n);
+  const midMag = new Float64Array(ring * bins);
+  const sideMag = new Float64Array(ring * bins);
 
-    for (let k = 0; k < opts.frameSize; k++) {
-      const w = band[k];
-      let mask = 0;
-      if (w > 0) {
-        const c = centredness(lre[k], lim[k], rre[k], rim[k]);
-        if (c > 0) mask = Math.pow(c, opts.exponent) * w;
+  const lre = new Float64Array(n);
+  const lim = new Float64Array(n);
+  const rre = new Float64Array(n);
+  const rim = new Float64Array(n);
+  const floor = new Float64Array(bins);
+  const sustained = new Float64Array(bins);
+  const scratch = new Float64Array(Math.max(FLOOR_TAPS, TIME_TAPS));
+
+  const accVocal = stft.createAccumulator(length);
+  const total = frames + TIME_REACH;
+
+  for (let f = 0; f < total; f++) {
+    if (f < frames) {
+      stft.analyzeFrame(left, f, lre, lim);
+      stft.analyzeFrame(right, f, rre, rim);
+
+      const slot = (f % ring) * n;
+      const magSlot = (f % ring) * bins;
+      for (let k = 0; k < n; k++) {
+        midRe[slot + k] = (lre[k] + rre[k]) * 0.5;
+        midIm[slot + k] = (lim[k] + rim[k]) * 0.5;
       }
-      lre[k] *= mask; lim[k] *= mask;
-      rre[k] *= mask; rim[k] *= mask;
+      for (let k = 0; k <= half; k++) {
+        midMag[magSlot + k] = Math.hypot(midRe[slot + k], midIm[slot + k]);
+        sideMag[magSlot + k] = Math.hypot((lre[k] - rre[k]) * 0.5, (lim[k] - rim[k]) * 0.5);
+      }
     }
 
-    stft.addFrame(accL, f, lre, lim);
-    stft.addFrame(accR, f, rre, rim);
-    if ((f & 31) === 0) yield f / frames;
+    const fc = f - TIME_REACH;
+    if (fc < 0) continue;
+
+    const slot = (fc % ring) * n;
+    const magSlot = (fc % ring) * bins;
+    broadbandFloor(midMag.subarray(magSlot, magSlot + bins), half, floor, scratch);
+
+    for (let k = 0; k <= half; k++) {
+      for (let t = 0; t < TIME_TAPS; t++) {
+        // Hold at the ends of the track rather than reflecting: there is no
+        // meaningful "before the first frame" to average against.
+        let g = fc + (t - ((TIME_TAPS - 1) >> 1)) * TIME_STRIDE;
+        if (g < 0) g = 0;
+        if (g > frames - 1) g = frames - 1;
+        scratch[t] = midMag[(g % ring) * bins + k];
+      }
+      sustained[k] = medianOf(scratch, TIME_TAPS);
+    }
+
+    for (let k = 0; k <= half; k++) {
+      const w = band[k];
+      const mag = midMag[magSlot + k];
+      let mask = 0;
+      if (w > 0 && mag > 1e-12) {
+        const structure = Math.max(
+          opts.percussiveSubtraction * floor[k],
+          opts.sustainedSubtraction * sustained[k]
+        );
+        const vocal = mag - opts.sideSubtraction * sideMag[magSlot + k] - structure;
+        if (vocal > 0) {
+          // Wiener form: whatever the subtraction did not claim is the accompaniment,
+          // and the exponent decides how sharply the line between them is drawn.
+          const accompaniment = mag - vocal;
+          const v = Math.pow(vocal, opts.exponent);
+          const a = Math.pow(accompaniment, opts.exponent);
+          mask = (v / (v + a)) * w;
+        }
+      }
+      midRe[slot + k] *= mask;
+      midIm[slot + k] *= mask;
+      if (k > 0 && k < half) {
+        midRe[slot + n - k] *= mask;
+        midIm[slot + n - k] *= mask;
+      }
+    }
+
+    stft.addFrame(accVocal, fc, midRe.subarray(slot, slot + n), midIm.subarray(slot, slot + n));
+    if ((f & 31) === 0) yield f / total;
   }
 
-  const vocalsL = stft.finish(accL);
-  const vocalsR = stft.finish(accR);
+  const vocal = stft.finish(accVocal);
+  const vocalsL = new Float64Array(length);
+  const vocalsR = new Float64Array(length);
   const instrumentalL = new Float64Array(length);
   const instrumentalR = new Float64Array(length);
+  const g = opts.overSubtraction;
   for (let i = 0; i < length; i++) {
-    instrumentalL[i] = left[i] - vocalsL[i];
-    instrumentalR[i] = right[i] - vocalsR[i];
+    // A centre-panned lead is by definition the same in both channels, so the vocal
+    // stem is that one signal on both sides rather than two separately masked ones.
+    const v = vocal[i];
+    vocalsL[i] = v;
+    vocalsR[i] = v;
+    instrumentalL[i] = left[i] - g * v;
+    instrumentalR[i] = right[i] - g * v;
   }
 
   return {
@@ -732,6 +938,35 @@ function scaleNotes(tonic, mode) {
   const names = noteNames(pc, mode);
   const steps = mode === 'minor' ? MINOR_STEPS : MAJOR_STEPS;
   return steps.map((s) => names[(pc + s) % 12]);
+}
+
+/**
+ * The twelve tonics available in a mode, each spelled the way that key is written.
+ *
+ * A mode is not something transposing can change -- shifting every note by the same
+ * amount moves a major song to another major key -- so the choice on offer is which
+ * of the twelve tonics to land on, not which of the twenty-four keys.
+ */
+function keysInMode(mode) {
+  const out = [];
+  for (let pc = 0; pc < 12; pc++) out.push(noteNames(pc, mode)[pc]);
+  return out;
+}
+
+/**
+ * The shortest way, in semitones, from one tonic to another.
+ *
+ * Every key is reachable in two directions, and the answer is folded into -6..+5 so
+ * the shorter one wins. C to G is a fifth up or a fourth down and both arrive at G,
+ * but moving down five semitones puts the audio through less of a stretch than
+ * moving up seven, so it comes out sounding better.
+ */
+function semitonesBetween(fromTonic, toTonic) {
+  const from = PITCH_CLASS.get(fromTonic);
+  const to = PITCH_CLASS.get(toTonic);
+  if (from === undefined) throw new Error(`unknown note ${fromTonic}`);
+  if (to === undefined) throw new Error(`unknown note ${toTonic}`);
+  return ((((to - from) % 12) + 18) % 12) - 6;
 }
 
 /**
@@ -906,148 +1141,350 @@ function transposeKey(tonic, mode, semitones) {
 /* ===== src/dsp/phasevocoder.js ===== */
 const TWO_PI = 2 * Math.PI;
 
+const STRETCH_DEFAULTS = {
+  frameSize: 4096,
+  analysisHop: 1024,
+  /**
+   * Keep the spectral envelope where it was instead of letting it ride up with the
+   * pitch. Moving it is what turns a voice shifted up into a chipmunk and a voice
+   * shifted down into a growl; holding it still keeps the singer sounding like the
+   * same person in a different key.
+   */
+  preserveFormants: true,
+  /**
+   * Re-lock every bin to the incoming phase when a frame is mostly new energy.
+   * Across a drum hit the running phase estimate is meaningless -- there is no steady
+   * partial to track -- and carrying it through is what softens the attack and leaves
+   * the kit sounding flammed.
+   */
+  transientThreshold: 1.6,
+};
+
 /** Wrap a phase difference into (-pi, pi]. */
 function principalArgument(phase) {
   return phase - TWO_PI * Math.round(phase / TWO_PI);
 }
 
+function hann(size) {
+  const w = new Float64Array(size);
+  for (let i = 0; i < size; i++) w[i] = 0.5 * (1 - Math.cos((TWO_PI * i) / size));
+  return w;
+}
+
 /**
- * Stretch or compress audio in time without changing its pitch.
+ * Smooth the magnitude spectrum into an envelope: the broad shape a spectrum has
+ * once the individual partials are averaged out. For a voice that shape is its
+ * formants, which is to say the shape of the singer's throat, and it should not move
+ * when the note does.
  *
- * Standard phase vocoder: estimate each bin's true frequency from how far its
- * phase advanced between analysis frames, then re-advance that phase over a
- * different synthesis hop.
- *
- * The identity phase-locking step is what keeps it from sounding underwater.
- * Advancing every bin independently lets the partials of one note drift out of
- * phase with each other; instead only spectral peaks accumulate phase, and the
- * bins around a peak keep their original phase relationship to it.
+ * A running sum keeps this at a constant cost per bin regardless of the width.
  */
-function* timeStretchSteps(samples, factor, options = {}) {
-  const { frameSize = 2048, analysisHop = 512 } = options;
+function spectralEnvelope(mag, half, width, out) {
+  const reach = Math.max(1, width >> 1);
+  let sum = 0;
+  let count = 0;
+  for (let k = 0; k <= Math.min(half, reach); k++) { sum += mag[k]; count++; }
+  for (let k = 0; k <= half; k++) {
+    const entering = k + reach;
+    const leaving = k - reach - 1;
+    if (k > 0) {
+      if (entering <= half) { sum += mag[entering]; count++; }
+      if (leaving >= 0) { sum -= mag[leaving]; count--; }
+    }
+    out[k] = count > 0 ? sum / count : 0;
+  }
+}
+
+const LANCZOS_LOBES = 3;
+
+function lanczos(x) {
+  if (x === 0) return 1;
+  if (x <= -LANCZOS_LOBES || x >= LANCZOS_LOBES) return 0;
+  const px = Math.PI * x;
+  return (LANCZOS_LOBES * Math.sin(px) * Math.sin(px / LANCZOS_LOBES)) / (px * px);
+}
+
+/**
+ * Read `input` at `ratio` samples per output sample, through a windowed-sinc kernel.
+ *
+ * Straight-line interpolation between neighbouring samples is cheap and audibly
+ * wrong: it dulls the top octave and folds whatever sits above the new Nyquist back
+ * down as aliasing, which is a good part of the metallic edge a naive pitch shifter
+ * has. When the read runs faster than the source the kernel is widened by the same
+ * factor, so it low-passes as it decimates rather than aliasing.
+ */
+function resampleTo(input, ratio, outLength) {
+  const scale = Math.max(1, ratio);
+  const radius = LANCZOS_LOBES * scale;
+  const out = new Float64Array(outLength);
+
+  for (let i = 0; i < outLength; i++) {
+    const pos = i * ratio;
+    const first = Math.ceil(pos - radius);
+    const last = Math.floor(pos + radius);
+    let sum = 0;
+    let norm = 0;
+    for (let j = first; j <= last; j++) {
+      const w = lanczos((pos - j) / scale);
+      if (w === 0) continue;
+      if (j >= 0 && j < input.length) sum += input[j] * w;
+      norm += w;
+    }
+    out[i] = Math.abs(norm) > 1e-9 ? sum / norm : 0;
+  }
+  return out;
+}
+
+/**
+ * Stretch a set of channels in time, in lockstep, without changing their pitch.
+ *
+ * Standard phase vocoder at heart: estimate each bin's true frequency from how far
+ * its phase advanced between analysis frames, then re-advance that phase over a
+ * different synthesis hop. Two things are layered on top.
+ *
+ * Identity phase locking keeps it from sounding underwater. Advancing every bin on
+ * its own lets the partials of one note drift apart from each other, so only spectral
+ * peaks accumulate phase and the bins around a peak keep their original relationship
+ * to it.
+ *
+ * Every channel is then rotated by the *same* phase correction, taken from their sum.
+ * Running a separate vocoder per channel is what smears a stereo image: the two sides
+ * accumulate phase independently, their relationship drifts, and a centred instrument
+ * wanders and widens. Rotating both by one correction leaves the difference between
+ * the channels exactly as it was recorded, so the image survives the shift.
+ */
+function* stretchChannelsSteps(channels, factor, options = {}) {
+  const opts = { ...STRETCH_DEFAULTS, ...options };
+  const { frameSize, analysisHop } = opts;
+  const count = channels.length;
+  const sourceLength = channels[0].length;
+
   const fft = new FFT(frameSize);
   const half = frameSize >> 1;
+  const window = hann(frameSize);
 
-  const window = new Float64Array(frameSize);
-  for (let i = 0; i < frameSize; i++) {
-    window[i] = 0.5 * (1 - Math.cos((TWO_PI * i) / frameSize));
+  const targetLength = Math.round(sourceLength * factor);
+  const padded = targetLength + 2 * frameSize;
+  const sums = [];
+  const weights = new Float64Array(padded);
+  for (let c = 0; c < count; c++) sums.push(new Float64Array(padded));
+
+  const re = [];
+  const im = [];
+  for (let c = 0; c < count; c++) {
+    re.push(new Float64Array(frameSize));
+    im.push(new Float64Array(frameSize));
   }
 
-  const targetLength = Math.round(samples.length * factor);
-  const padded = targetLength + 2 * frameSize;
-  const sum = new Float64Array(padded);
-  const weight = new Float64Array(padded);
-
-  const re = new Float64Array(frameSize);
-  const im = new Float64Array(frameSize);
+  const refRe = new Float64Array(frameSize);
+  const refIm = new Float64Array(frameSize);
   const magnitude = new Float64Array(half + 1);
   const phase = new Float64Array(half + 1);
   const previousPhase = new Float64Array(half + 1);
+  const previousMagnitude = new Float64Array(half + 1);
   const runningPhase = new Float64Array(half + 1);
   const synthesisPhase = new Float64Array(half + 1);
+  const envelope = new Float64Array(half + 1);
+  const shifted = new Float64Array(half + 1);
+  const correction = new Float64Array(half + 1);
 
-  const frames = Math.ceil((samples.length + frameSize) / analysisHop) + 1;
+  // Formants are restored against the pitch ratio the caller is about to apply with
+  // the resampler, which is the whole of the shift that this stretch is not undoing.
+  const pitchRatio = opts.formantRatio || 1;
+  const wantFormants = opts.preserveFormants && Math.abs(pitchRatio - 1) > 1e-6;
+  const envelopeWidth = Math.max(4, frameSize >> 6);
+
+  const frames = Math.ceil((sourceLength + frameSize) / analysisHop) + 1;
+  let fluxAverage = 0;
 
   for (let f = 0; f < frames; f++) {
     const inStart = f * analysisHop - frameSize + analysisHop;
-    for (let i = 0; i < frameSize; i++) {
-      const s = inStart + i;
-      re[i] = s >= 0 && s < samples.length ? samples[s] * window[i] : 0;
-      im[i] = 0;
-    }
-    fft.forward(re, im);
-
-    for (let k = 0; k <= half; k++) {
-      magnitude[k] = Math.hypot(re[k], im[k]);
-      phase[k] = Math.atan2(im[k], re[k]);
-    }
-
-    // Peaks own their phase; their neighbours follow along.
-    for (let k = 0; k <= half; k++) {
-      const left = k > 0 ? magnitude[k - 1] : -1;
-      const right = k < half ? magnitude[k + 1] : -1;
-      if (magnitude[k] > left && magnitude[k] >= right) {
-        const expected = (TWO_PI * k * analysisHop) / frameSize;
-        const drift = principalArgument(phase[k] - previousPhase[k] - expected);
-        runningPhase[k] = principalArgument(runningPhase[k] + (expected + drift) * factor);
-        synthesisPhase[k] = runningPhase[k];
-      } else {
-        synthesisPhase[k] = Number.NaN;
+    for (let c = 0; c < count; c++) {
+      const src = channels[c];
+      const cre = re[c];
+      const cim = im[c];
+      for (let i = 0; i < frameSize; i++) {
+        const s = inStart + i;
+        cre[i] = s >= 0 && s < src.length ? src[s] * window[i] : 0;
+        cim[i] = 0;
       }
+      fft.forward(cre, cim);
     }
-    let nearestPeak = -1;
+
+    // The reference the phase is tracked on is the sum of the channels, so every
+    // channel is corrected by one shared rotation.
     for (let k = 0; k <= half; k++) {
-      if (!Number.isNaN(synthesisPhase[k])) { nearestPeak = k; continue; }
-      let peak = nearestPeak;
-      for (let j = k + 1; j <= half; j++) {
-        if (!Number.isNaN(synthesisPhase[j])) {
-          if (peak < 0 || j - k < k - peak) peak = j;
-          break;
+      let sr = 0;
+      let si = 0;
+      for (let c = 0; c < count; c++) { sr += re[c][k]; si += im[c][k]; }
+      refRe[k] = sr / count;
+      refIm[k] = si / count;
+      magnitude[k] = Math.hypot(refRe[k], refIm[k]);
+      phase[k] = Math.atan2(refIm[k], refRe[k]);
+    }
+
+    // Spectral flux against a running average: a frame that is mostly new energy is
+    // an attack, and the phase history across it is worthless.
+    let flux = 0;
+    for (let k = 0; k <= half; k++) {
+      const rise = magnitude[k] - previousMagnitude[k];
+      if (rise > 0) flux += rise;
+    }
+    const transient = f > 0 && fluxAverage > 0 && flux > opts.transientThreshold * fluxAverage;
+    fluxAverage = f === 0 ? flux : fluxAverage * 0.9 + flux * 0.1;
+
+    if (transient) {
+      for (let k = 0; k <= half; k++) synthesisPhase[k] = phase[k];
+    } else {
+      // Peaks own their phase; their neighbours follow along.
+      for (let k = 0; k <= half; k++) {
+        const left = k > 0 ? magnitude[k - 1] : -1;
+        const right = k < half ? magnitude[k + 1] : -1;
+        if (magnitude[k] > left && magnitude[k] >= right) {
+          const expected = (TWO_PI * k * analysisHop) / frameSize;
+          const drift = principalArgument(phase[k] - previousPhase[k] - expected);
+          runningPhase[k] = principalArgument(runningPhase[k] + (expected + drift) * factor);
+          synthesisPhase[k] = runningPhase[k];
+        } else {
+          synthesisPhase[k] = Number.NaN;
         }
       }
-      synthesisPhase[k] = peak >= 0
-        ? runningPhase[peak] + (phase[k] - phase[peak])
-        : phase[k];
+      let nearestPeak = -1;
+      for (let k = 0; k <= half; k++) {
+        if (!Number.isNaN(synthesisPhase[k])) { nearestPeak = k; continue; }
+        let peak = nearestPeak;
+        for (let j = k + 1; j <= half; j++) {
+          if (!Number.isNaN(synthesisPhase[j])) {
+            if (peak < 0 || j - k < k - peak) peak = j;
+            break;
+          }
+        }
+        synthesisPhase[k] = peak >= 0
+          ? runningPhase[peak] + (phase[k] - phase[peak])
+          : phase[k];
+      }
     }
+
     for (let k = 0; k <= half; k++) {
       previousPhase[k] = phase[k];
+      previousMagnitude[k] = magnitude[k];
       runningPhase[k] = synthesisPhase[k];
     }
 
-    re[0] = magnitude[0] * Math.cos(synthesisPhase[0]); im[0] = 0;
-    re[half] = magnitude[half] * Math.cos(synthesisPhase[half]); im[half] = 0;
-    for (let k = 1; k < half; k++) {
-      const c = magnitude[k] * Math.cos(synthesisPhase[k]);
-      const s = magnitude[k] * Math.sin(synthesisPhase[k]);
-      re[k] = c; im[k] = s;
-      re[frameSize - k] = c; im[frameSize - k] = -s;
+    /*
+     * Formant correction. The resampler about to run will carry the content at bin k
+     * out to bin k * pitchRatio, taking the envelope with it. Pre-dividing by the
+     * envelope that would land there and multiplying by the one that belongs there
+     * leaves the envelope where it started while the partials still move.
+     */
+    if (wantFormants) {
+      spectralEnvelope(magnitude, half, envelopeWidth, envelope);
+      for (let k = 0; k <= half; k++) {
+        const source = Math.min(half, Math.round(k * pitchRatio));
+        shifted[k] = envelope[source];
+      }
+      let peak = 0;
+      for (let k = 0; k <= half; k++) if (envelope[k] > peak) peak = envelope[k];
+      const floor = peak * 1e-4 + 1e-12;
+      let before = 0;
+      let after = 0;
+      for (let k = 0; k <= half; k++) {
+        const c = shifted[k] / Math.max(envelope[k], floor);
+        // Hold the correction inside a sane range: an envelope ratio can run away in
+        // near-empty bins and turn quiet noise into a whistle.
+        const clamped = c > 4 ? 4 : c < 0.25 ? 0.25 : c;
+        correction[k] = clamped;
+        before += magnitude[k];
+        after += magnitude[k] * clamped;
+      }
+      // Reshaping the envelope must not change how loud the frame is. Without this
+      // the correction quietly acts as a gain, and a shift of an octave arrives
+      // several decibels down on where it started.
+      const makeup = before > 0 && after > 0 ? before / after : 1;
+      for (let k = 0; k <= half; k++) correction[k] *= makeup;
     }
-    fft.inverse(re, im);
+
+    for (let c = 0; c < count; c++) {
+      const cre = re[c];
+      const cim = im[c];
+      for (let k = 0; k <= half; k++) {
+        // Rotate this channel by the shared correction, leaving its own magnitude and
+        // its phase relative to the other channels untouched.
+        const turn = synthesisPhase[k] - phase[k];
+        const cos = Math.cos(turn);
+        const sin = Math.sin(turn);
+        let vr = cre[k] * cos - cim[k] * sin;
+        let vi = cre[k] * sin + cim[k] * cos;
+        if (wantFormants) { vr *= correction[k]; vi *= correction[k]; }
+        cre[k] = vr;
+        cim[k] = vi;
+        if (k > 0 && k < half) {
+          cre[frameSize - k] = vr;
+          cim[frameSize - k] = -vi;
+        }
+      }
+      cim[0] = 0;
+      cim[half] = 0;
+      fft.inverse(cre, cim);
+    }
 
     const outStart = Math.round(f * analysisHop * factor) - frameSize + analysisHop;
     for (let i = 0; i < frameSize; i++) {
       const s = outStart + i;
       if (s < 0 || s >= padded) continue;
       const w = window[i];
-      sum[s] += re[i] * w;
-      weight[s] += w * w;
+      for (let c = 0; c < count; c++) sums[c][s] += re[c][i] * w;
+      weights[s] += w * w;
     }
 
     if ((f & 31) === 0) yield f / frames;
   }
 
-  const out = new Float64Array(targetLength);
-  for (let i = 0; i < targetLength; i++) {
-    out[i] = weight[i] > 1e-12 ? sum[i] / weight[i] : 0;
+  const out = [];
+  for (let c = 0; c < count; c++) {
+    const channel = new Float64Array(targetLength);
+    for (let i = 0; i < targetLength; i++) {
+      channel[i] = weights[i] > 1e-12 ? sums[c][i] / weights[i] : 0;
+    }
+    out.push(channel);
   }
   return out;
 }
 
-/** Read `input` at `ratio` samples per output sample, linearly interpolated. */
-function resampleTo(input, ratio, outLength) {
-  const out = new Float64Array(outLength);
-  for (let i = 0; i < outLength; i++) {
-    const pos = i * ratio;
-    const base = Math.floor(pos);
-    const frac = pos - base;
-    const a = base >= 0 && base < input.length ? input[base] : 0;
-    const b = base + 1 >= 0 && base + 1 < input.length ? input[base + 1] : 0;
-    out[i] = a + (b - a) * frac;
-  }
-  return out;
+/** Stretch or compress audio in time without changing its pitch. */
+function* timeStretchSteps(samples, factor, options = {}) {
+  const out = yield* stretchChannelsSteps([samples], factor, options);
+  return out[0];
 }
 
 /**
- * Transpose by a number of semitones, leaving the duration unchanged.
+ * Change pitch and tempo together, across every channel at once.
  *
- * Stretch by the frequency ratio, then resample by the same ratio: the stretch
- * restores the length the resampling would otherwise change, and what is left
- * is a pure pitch change.
+ * Running a pitch shift and then a time stretch would put the audio through the
+ * vocoder twice and smear it twice over. Folding both into one stretch and one
+ * resample keeps the artefacts to a single pass: stretch by tempo x ratio, then
+ * resample by ratio, which cancels the ratio out of the duration and leaves it in
+ * the pitch.
  */
-function* pitchShiftSteps(samples, semitones, options = {}) {
+function* transformChannelsSteps(channels, semitones, tempoFactor = 1, options = {}) {
   const ratio = Math.pow(2, semitones / 12);
-  const stretched = yield* timeStretchSteps(samples, ratio, options);
-  return resampleTo(stretched, ratio, samples.length);
+  const targetLength = Math.round(channels[0].length * tempoFactor);
+  const stretched = yield* stretchChannelsSteps(channels, tempoFactor * ratio, {
+    ...options,
+    formantRatio: ratio,
+  });
+  return stretched.map((channel) => resampleTo(channel, ratio, targetLength));
+}
+
+/** Transpose by a number of semitones, leaving the duration unchanged. */
+function* pitchShiftSteps(samples, semitones, options = {}) {
+  const out = yield* transformChannelsSteps([samples], semitones, 1, options);
+  return out[0];
+}
+
+function* transformSteps(samples, semitones, tempoFactor = 1, options = {}) {
+  const out = yield* transformChannelsSteps([samples], semitones, tempoFactor, options);
+  return out[0];
 }
 
 function drive(steps) {
@@ -1066,25 +1503,14 @@ function pitchShift(samples, semitones, options = {}) {
   return drive(pitchShiftSteps(samples, semitones, options));
 }
 
-/**
- * Change pitch and tempo together in a single pass.
- *
- * Running pitchShift and timeStretch one after the other would put the audio
- * through the vocoder twice and smear it twice over. Folding both into one
- * stretch and one resample keeps the artefacts to a single pass: stretch by
- * tempo x ratio, then resample by ratio, which cancels the ratio out of the
- * duration and leaves it in the pitch.
- */
-function* transformSteps(samples, semitones, tempoFactor = 1, options = {}) {
-  const ratio = Math.pow(2, semitones / 12);
-  const targetLength = Math.round(samples.length * tempoFactor);
-  const stretched = yield* timeStretchSteps(samples, tempoFactor * ratio, options);
-  return resampleTo(stretched, ratio, targetLength);
-}
-
 /** Run a combined pitch and tempo change to completion. */
 function transform(samples, semitones, tempoFactor = 1, options = {}) {
   return drive(transformSteps(samples, semitones, tempoFactor, options));
+}
+
+/** Run a combined pitch and tempo change across channels held in lockstep. */
+function transformChannels(channels, semitones, tempoFactor = 1, options = {}) {
+  return drive(transformChannelsSteps(channels, semitones, tempoFactor, options));
 }
 
 /* ===== src/dsp/wav.js ===== */
@@ -1468,13 +1894,16 @@ const ui = {
   keyName: el('key-name'),
   keyConfidence: el('key-confidence'),
   scaleRow: el('scale-row'),
+  targetKey: el('target-key'),
+  keyTargetNote: el('key-target-note'),
   factBpm: el('fact-bpm'),
   factDuration: el('fact-duration'),
 
   strength: el('strength'),
   strengthOut: el('strength-out'),
-  transpose: el('transpose'),
-  transposeOut: el('transpose-out'),
+  pitch: el('pitch'),
+  pitchOut: el('pitch-out'),
+  pitchWarning: el('pitch-warning'),
   tempo: el('tempo'),
   tempoOut: el('tempo-out'),
   apply: el('apply'),
@@ -1493,9 +1922,12 @@ const state = {
   sampleRate: 44100,
   source: null,      // the decoded original, as stereo floats
   separated: null,   // stems straight out of the separator
-  rendered: null,    // stems after transpose and tempo, what you hear
+  rendered: null,    // stems after the pitch and tempo change, what you hear
   key: null,
-  appliedStrength: 2,
+  tempo: null,
+  appliedStrength: null,
+  renderedPitch: 0,
+  renderedTempo: 100,
 };
 
 const MIX_PRESETS = {
@@ -1504,13 +1936,16 @@ const MIX_PRESETS = {
   acapella: { vocals: 1, instrumental: 0 },
 };
 
+/** Past this many semitones the stretch is far enough to hear. */
+const LARGE_SHIFT = 7;
+
 /**
  * Drive a DSP generator without freezing the page.
  *
- * A file:// page cannot spawn a Worker, so the only way to keep the interface
- * alive during a minute of signal processing is to hand control back to the
- * browser every so often. Yielding on elapsed time rather than a fixed step
- * count keeps that responsive whatever the machine's speed.
+ * A file:// page cannot spawn a Worker, so the only way to keep the interface alive
+ * during a minute of signal processing is to hand control back to the browser every
+ * so often. Yielding on elapsed time rather than a fixed step count keeps that
+ * responsive whatever the machine's speed.
  */
 async function run(steps, label) {
   ui.progressLabel.textContent = label;
@@ -1536,9 +1971,26 @@ function showStage(stage) {
   ui.workspace.hidden = stage !== 'ready';
 }
 
+/**
+ * The slider reads as "how hard to push"; the engine wants three numbers, and they
+ * only make sense moved together.
+ *
+ * Pushing harder sharpens the mask, takes more of the vocal estimate back out of the
+ * backing track, and eases off the protection that holds centre-panned chords in
+ * place. That last one is the real cost. Keys and rhythm guitars sit in the middle of
+ * the mix exactly where the voice does, so scrubbing the voice harder always takes
+ * some of them with it, and this slider is where that trade is made.
+ */
 function separationOptions() {
-  // The slider reads as "how hard to push"; the engine wants a mask exponent.
-  return { exponent: 1 + Number(ui.strength.value) * 0.04 };
+  const push = Number(ui.strength.value) / 100;
+  return {
+    exponent: 1.4 + push * 2.0,
+    // Held deliberately short of the point where the subtraction overshoots. Past
+    // that the residual crosses through silence and comes back up phase-inverted, so
+    // the top of the slider would remove less of the singer than the middle of it.
+    overSubtraction: 1 + push * 0.45,
+    sustainedSubtraction: 0.75 - push * 0.25,
+  };
 }
 
 async function loadFile(file) {
@@ -1559,12 +2011,17 @@ async function loadFile(file) {
   state.name = file.name;
   state.sampleRate = buffer.sampleRate;
   state.source = toStereo(buffer);
+  ui.pitch.value = '0';
+  ui.tempo.value = '100';
 
   await separateCurrent();
   await analyseCurrent();
+  populateKeyChoices();
   await renderCurrent();
 
   ui.trackName.textContent = state.name;
+  rememberRenderSettings();
+  markPendingChanges();
   showStage('ready');
   applyMix();
 }
@@ -1573,7 +2030,7 @@ async function separateCurrent() {
   const { left, right } = state.source;
   const result = await run(
     separateSteps(left, right, state.sampleRate, separationOptions()),
-    'Separating vocals from the backing track'
+    'Separating the vocals from the backing track'
   );
   state.separated = result;
   state.appliedStrength = Number(ui.strength.value);
@@ -1584,32 +2041,37 @@ async function analyseCurrent() {
   ui.progressLabel.textContent = 'Finding the key and tempo';
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  // Read the key off the instrumental: vocal vibrato blurs the chroma.
+  // Read the key off the backing track: vocal vibrato blurs the chroma.
   const instrumental = state.separated.instrumental;
   const analysis = monoForAnalysis(instrumental.left, instrumental.right, state.sampleRate);
   state.key = detectKey(analysis.samples, analysis.sampleRate);
   state.tempo = detectTempo(analysis.samples, analysis.sampleRate);
 }
 
-/** Apply the current transpose and tempo, and rebuild everything downstream. */
+/** Apply the current pitch shift and tempo, and rebuild everything downstream. */
 async function renderCurrent() {
-  const semitones = Number(ui.transpose.value);
+  const semitones = Number(ui.pitch.value);
   const tempoFactor = Number(ui.tempo.value) / 100;
   const stems = state.separated;
 
   if (semitones === 0 && tempoFactor === 1) {
     state.rendered = { vocals: stems.vocals, instrumental: stems.instrumental };
   } else {
-    const label = 'Transposing and stretching';
-    const vocals = {
-      left: await run(transformSteps(stems.vocals.left, semitones, tempoFactor), label),
-      right: await run(transformSteps(stems.vocals.right, semitones, tempoFactor), label),
+    const label = semitones === 0 ? 'Changing the tempo' : 'Changing the key';
+    // Both channels of a stem go through in one call, so the vocoder can rotate them
+    // by a single shared phase correction and leave the stereo image where it was.
+    const [vocalsL, vocalsR] = await run(
+      transformChannelsSteps([stems.vocals.left, stems.vocals.right], semitones, tempoFactor),
+      label
+    );
+    const [instrumentalL, instrumentalR] = await run(
+      transformChannelsSteps([stems.instrumental.left, stems.instrumental.right], semitones, tempoFactor),
+      label
+    );
+    state.rendered = {
+      vocals: { left: vocalsL, right: vocalsR },
+      instrumental: { left: instrumentalL, right: instrumentalR },
     };
-    const instrumental = {
-      left: await run(transformSteps(stems.instrumental.left, semitones, tempoFactor), label),
-      right: await run(transformSteps(stems.instrumental.right, semitones, tempoFactor), label),
-    };
-    state.rendered = { vocals, instrumental };
   }
 
   const rate = state.sampleRate;
@@ -1617,7 +2079,7 @@ async function renderCurrent() {
   const instrumentalBuffer = toAudioBuffer(state.rendered.instrumental.left, state.rendered.instrumental.right, rate);
 
   if (!player) {
-    player = new StemPlayer(vocalBuffer.context || audioContext());
+    player = new StemPlayer(audioContext());
     player.onEnded = () => {
       ui.play.textContent = 'Play';
       view.setPosition(0);
@@ -1639,8 +2101,89 @@ async function renderCurrent() {
   applyMix();
 }
 
+/*
+ * Renders are long, and the controls that start one are sliders somebody is dragging.
+ * Rather than queue up a render per nudge, a request that arrives mid-render just
+ * marks that another is wanted, and the loop picks up the settings as they finally
+ * stand once the current pass finishes.
+ */
+let rendering = false;
+let renderWanted = false;
+
+async function requestRender() {
+  if (!state.separated) return;
+  if (rendering) {
+    renderWanted = true;
+    return;
+  }
+
+  rendering = true;
+  const wasPlaying = player && player.playing;
+  if (player) player.pause();
+  ui.play.textContent = 'Play';
+
+  try {
+    do {
+      renderWanted = false;
+      showStage('working');
+      ui.progressBar.style.width = '0%';
+      await renderCurrent();
+    } while (renderWanted);
+  } finally {
+    rendering = false;
+    rememberRenderSettings();
+    markPendingChanges();
+    showStage('ready');
+    if (wasPlaying) {
+      player.play();
+      ui.play.textContent = 'Pause';
+    }
+  }
+}
+
+/** Fill the key menu with the twelve tonics of the detected mode. */
+function populateKeyChoices() {
+  const mode = state.key.mode;
+  ui.targetKey.replaceChildren(...keysInMode(mode).map((tonic) => {
+    const option = document.createElement('option');
+    option.value = tonic;
+    option.textContent = `${tonic} ${mode}`;
+    return option;
+  }));
+  syncKeyChoice();
+}
+
+/** Point the key menu at whatever key the current pitch shift actually lands on. */
+function syncKeyChoice() {
+  if (!state.key) return;
+  const semitones = Number(ui.pitch.value);
+  const landing = semitones === 0
+    ? state.key
+    : transposeKey(state.key.tonic, state.key.mode, semitones);
+  ui.targetKey.value = landing.tonic;
+  ui.keyTargetNote.textContent = semitones === 0
+    ? 'as recorded'
+    : `${semitones > 0 ? 'up' : 'down'} ${Math.abs(semitones)} ` +
+      `${Math.abs(semitones) === 1 ? 'semitone' : 'semitones'} from ${state.key.name}`;
+}
+
+function paintPitchControl() {
+  const semitones = Number(ui.pitch.value);
+  const sign = semitones > 0 ? '+' : '';
+  const unit = Math.abs(semitones) === 1 ? 'semitone' : 'semitones';
+  ui.pitchOut.textContent = `${sign}${semitones} ${unit}`;
+
+  const large = Math.abs(semitones) >= LARGE_SHIFT;
+  ui.pitchWarning.hidden = !large;
+  ui.pitchWarning.textContent = large
+    ? `${Math.abs(semitones)} semitones is a long way to move a recording. The further it ` +
+      'goes the more the audio is stretched and resampled, so expect it to soften, and ' +
+      'to hear some smearing on drums and cymbals. Smaller shifts hold up better.'
+    : '';
+}
+
 function paintReadout() {
-  const semitones = Number(ui.transpose.value);
+  const semitones = Number(ui.pitch.value);
   const key = semitones === 0
     ? state.key
     : transposeKey(state.key.tonic, state.key.mode, semitones);
@@ -1648,7 +2191,7 @@ function paintReadout() {
   ui.keyName.textContent = key.name;
   ui.keyConfidence.textContent = semitones === 0
     ? `Detected with ${(state.key.confidence * 100).toFixed(0)}% confidence`
-    : `${state.key.name} transposed by ${semitones > 0 ? '+' : ''}${semitones}`;
+    : `${state.key.name} shifted by ${semitones > 0 ? '+' : ''}${semitones}`;
 
   ui.scaleRow.replaceChildren(...key.notes.map((note) => {
     const li = document.createElement('li');
@@ -1656,6 +2199,8 @@ function paintReadout() {
     return li;
   }));
 
+  // The vocoder holds the tempo through a pitch shift, so the BPM only follows the
+  // tempo control.
   const bpm = state.tempo.bpm * (Number(ui.tempo.value) / 100);
   ui.factBpm.textContent = bpm.toFixed(0);
   ui.factDuration.textContent = formatTime(player ? player.duration : 0);
@@ -1685,17 +2230,20 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
+/**
+ * Only the vocal removal strength needs the Apply button. It changes the separation
+ * itself, which means running the whole analysis again; pitch and tempo only restage
+ * stems that are already separated, so they apply themselves as soon as the slider
+ * is let go.
+ */
 function markPendingChanges() {
-  const changed =
-    Number(ui.strength.value) !== state.appliedStrength ||
-    Number(ui.transpose.value) !== state.renderedTranspose ||
-    Number(ui.tempo.value) !== state.renderedTempo;
+  const changed = state.separated !== null && Number(ui.strength.value) !== state.appliedStrength;
   ui.apply.disabled = !changed;
   ui.applyNote.textContent = changed ? 'Not applied yet' : '';
 }
 
 function rememberRenderSettings() {
-  state.renderedTranspose = Number(ui.transpose.value);
+  state.renderedPitch = Number(ui.pitch.value);
   state.renderedTempo = Number(ui.tempo.value);
 }
 
@@ -1769,44 +2317,63 @@ for (const preset of ui.presets) {
   });
 }
 
+// Choosing a key sets the pitch shift that lands on it, taking the shorter of the
+// two ways round.
+ui.targetKey.addEventListener('change', () => {
+  if (!state.key) return;
+  ui.pitch.value = String(semitonesBetween(state.key.tonic, ui.targetKey.value));
+  paintPitchControl();
+  syncKeyChoice();
+  requestRender();
+});
+
+ui.pitch.addEventListener('input', () => {
+  paintPitchControl();
+  syncKeyChoice();
+});
+ui.pitch.addEventListener('change', () => requestRender());
+
+ui.tempo.addEventListener('input', () => {
+  ui.tempoOut.textContent = ui.tempo.value + '%';
+});
+ui.tempo.addEventListener('change', () => requestRender());
+
 ui.strength.addEventListener('input', () => {
   ui.strengthOut.textContent = ui.strength.value;
   markPendingChanges();
 });
-ui.transpose.addEventListener('input', () => {
-  const v = Number(ui.transpose.value);
-  ui.transposeOut.textContent = v > 0 ? '+' + v : String(v);
-  markPendingChanges();
-});
-ui.tempo.addEventListener('input', () => {
-  ui.tempoOut.textContent = ui.tempo.value + '%';
-  markPendingChanges();
-});
 
 ui.apply.addEventListener('click', async () => {
+  if (!state.source || rendering) return;
   const wasPlaying = player && player.playing;
   if (player) player.pause();
   ui.play.textContent = 'Play';
   showStage('working');
   ui.progressBar.style.width = '0%';
 
-  if (Number(ui.strength.value) !== state.appliedStrength) {
+  rendering = true;
+  try {
     await separateCurrent();
     await analyseCurrent();
-  }
-  await renderCurrent();
-  rememberRenderSettings();
-  markPendingChanges();
-  showStage('ready');
-  if (wasPlaying) {
-    player.play();
-    ui.play.textContent = 'Pause';
+    populateKeyChoices();
+    await renderCurrent();
+  } finally {
+    rendering = false;
+    rememberRenderSettings();
+    markPendingChanges();
+    showStage('ready');
+    if (wasPlaying) {
+      player.play();
+      ui.play.textContent = 'Pause';
+    }
   }
 });
 
 function stemFilename(suffix) {
   const base = state.name.replace(/\.[^.]+$/, '') || 'track';
-  return `${base} - ${suffix}.wav`;
+  const semitones = Number(ui.pitch.value);
+  const key = semitones === 0 ? '' : ` (${transposeKey(state.key.tonic, state.key.mode, semitones).name})`;
+  return `${base} - ${suffix}${key}.wav`;
 }
 
 ui.downloadVocals.addEventListener('click', () => {
@@ -1839,6 +2406,7 @@ window.addEventListener('resize', () => {
   }
 });
 
+paintPitchControl();
 rememberRenderSettings();
 markPendingChanges();
 showStage('idle');

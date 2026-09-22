@@ -39,6 +39,35 @@ export function scaleNotes(tonic, mode) {
 }
 
 /**
+ * The twelve tonics available in a mode, each spelled the way that key is written.
+ *
+ * A mode is not something transposing can change -- shifting every note by the same
+ * amount moves a major song to another major key -- so the choice on offer is which
+ * of the twelve tonics to land on, not which of the twenty-four keys.
+ */
+export function keysInMode(mode) {
+  const out = [];
+  for (let pc = 0; pc < 12; pc++) out.push(noteNames(pc, mode)[pc]);
+  return out;
+}
+
+/**
+ * The shortest way, in semitones, from one tonic to another.
+ *
+ * Every key is reachable in two directions, and the answer is folded into -6..+5 so
+ * the shorter one wins. C to G is a fifth up or a fourth down and both arrive at G,
+ * but moving down five semitones puts the audio through less of a stretch than
+ * moving up seven, so it comes out sounding better.
+ */
+export function semitonesBetween(fromTonic, toTonic) {
+  const from = PITCH_CLASS.get(fromTonic);
+  const to = PITCH_CLASS.get(toTonic);
+  if (from === undefined) throw new Error(`unknown note ${fromTonic}`);
+  if (to === undefined) throw new Error(`unknown note ${toTonic}`);
+  return ((((to - from) % 12) + 18) % 12) - 6;
+}
+
+/**
  * Fold the spectrum into twelve pitch classes, summed over the whole track.
  *
  * The band limit matters: below ~100 Hz the bins are too wide to resolve a
