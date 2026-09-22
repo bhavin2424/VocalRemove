@@ -1,0 +1,11 @@
+{
+  "name": "vocal-remover",
+  "version": "1.0.0",
+  "description": "Offline vocal remover, karaoke player, key/BPM finder and transposer. Builds to a single self-contained HTML file.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build": "node build.mjs"
+  }
+}

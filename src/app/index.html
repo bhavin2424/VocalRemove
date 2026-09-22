@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitkit</title>
+<style>
+{{STYLES}}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <h1>Splitkit</h1>
+  </div>
+  <p class="tagline">Split a song into vocals and backing track, find its key, and change it. Everything runs on this computer.</p>
+  <button type="button" class="button button-primary" id="open-file">Open a song</button>
+  <input type="file" id="file-input" accept="audio/*" hidden>
+</header>
+
+<main>
+
+  <section class="dropzone" id="dropzone">
+    <p class="dropzone-lead">Drop a song here</p>
+    <p class="dropzone-note">MP3, WAV, FLAC, M4A or OGG. Nothing is uploaded &mdash; the file never leaves this computer.</p>
+    <p class="dropzone-error" id="drop-error" role="alert"></p>
+  </section>
+
+  <section class="progress" id="progress-panel" hidden>
+    <p class="progress-label" id="progress-label">Working</p>
+    <div class="meter"><div class="meter-fill" id="progress-bar"></div></div>
+  </section>
+
+  <section id="workspace" hidden>
+
+    <p class="notice" id="mono-notice" hidden>
+      This track is mono. Splitting relies on the difference between the left and right
+      channels, so there is nothing here to separate. Try a stereo version of the song.
+    </p>
+
+    <figure class="stage">
+      <div class="waveform-shell">
+        <canvas id="waveform"></canvas>
+      </div>
+      <figcaption class="legend">
+        <span><i class="swatch swatch-vocals"></i>Vocals</span>
+        <span><i class="swatch swatch-instrumental"></i>Backing track</span>
+        <span>Click the waveform to jump.</span>
+      </figcaption>
+    </figure>
+
+    <div class="transport">
+      <button type="button" class="button" id="play">Play</button>
+      <span class="transport-time" id="time">0:00 / 0:00</span>
+      <span class="transport-name" id="track-name"></span>
+    </div>
+
+    <div class="console">
+
+      <section>
+        <h2>Mix</h2>
+        <div class="strips">
+          <div class="strip strip-vocals">
+            <span class="strip-name">Vocals</span>
+            <input type="range" class="fader" id="fader-vocals" min="0" max="100" value="100" aria-label="Vocal level">
+            <span class="strip-value" id="value-vocals">100%</span>
+            <button type="button" class="strip-mute" id="mute-vocals" aria-pressed="false">Mute</button>
+          </div>
+          <div class="strip strip-instrumental">
+            <span class="strip-name">Backing</span>
+            <input type="range" class="fader" id="fader-instrumental" min="0" max="100" value="100" aria-label="Backing track level">
+            <span class="strip-value" id="value-instrumental">100%</span>
+            <button type="button" class="strip-mute" id="mute-instrumental" aria-pressed="false">Mute</button>
+          </div>
+        </div>
+        <div class="presets">
+          <button type="button" class="preset" data-preset="original" aria-pressed="true">Original</button>
+          <button type="button" class="preset" data-preset="karaoke" aria-pressed="false">Karaoke</button>
+          <button type="button" class="preset" data-preset="acapella" aria-pressed="false">Vocals only</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Key and tempo</h2>
+        <div class="plate">
+          <p class="key-name" id="key-name">&mdash;</p>
+          <p class="key-confidence" id="key-confidence"></p>
+          <ul class="scale-row" id="scale-row"></ul>
+          <div class="facts">
+            <div>
+              <div class="fact-value" id="fact-bpm">&mdash;</div>
+              <div class="fact-label">BPM</div>
+            </div>
+            <div>
+              <div class="fact-value" id="fact-duration">0:00</div>
+              <div class="fact-label">Length</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="controls">
+      <h2>Adjust</h2>
+
+      <div class="control">
+        <label for="transpose">Transpose</label>
+        <input type="range" id="transpose" min="-12" max="12" step="1" value="0">
+        <output id="transpose-out">0</output>
+      </div>
+
+      <div class="control">
+        <label for="tempo">Tempo</label>
+        <input type="range" id="tempo" min="50" max="200" step="1" value="100">
+        <output id="tempo-out">100%</output>
+      </div>
+
+      <div class="control">
+        <label for="strength">Split strength</label>
+        <input type="range" id="strength" min="5" max="60" step="1" value="25">
+        <output id="strength-out">25</output>
+      </div>
+
+      <div class="control-actions">
+        <button type="button" class="button button-primary" id="apply" disabled>Apply changes</button>
+        <span class="control-note" id="apply-note"></span>
+      </div>
+    </div>
+
+    <div class="downloads">
+      <button type="button" class="button" id="download-vocals">Download vocals</button>
+      <button type="button" class="button" id="download-instrumental">Download backing track</button>
+      <button type="button" class="button" id="download-mix">Download the mix as you set it</button>
+    </div>
+
+  </section>
+
+</main>
+
+<script>
+{{SCRIPT}}
+</script>
+</body>
+</html>

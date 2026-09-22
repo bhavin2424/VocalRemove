@@ -1,0 +1,1850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitkit</title>
+<style>
+:root {
+  --bg: #141c26;
+  --panel: #1e2936;
+  --panel-raised: #243141;
+  --rule: #33424f;
+  --text: #e6edf3;
+  --muted: #8fa3b5;
+  --vocals: #e8a33d;
+  --instrumental: #4fb9a5;
+  --danger: #e4614d;
+  --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --serif: Constantia, Cambria, Georgia, "Times New Roman", serif;
+}
+
+* { box-sizing: border-box; }
+
+html { color-scheme: dark; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { font-weight: 600; margin: 0; line-height: 1.2; }
+
+button { font: inherit; color: inherit; cursor: pointer; }
+
+:focus-visible {
+  outline: 2px solid var(--vocals);
+  outline-offset: 2px;
+}
+
+/* ---------- shell ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+.brand { display: flex; align-items: center; gap: 0.7rem; }
+
+/* Two bars at the channel colours: the product in one mark. */
+.brand-mark {
+  width: 1.1rem; height: 1.6rem;
+  background:
+    linear-gradient(var(--vocals) 0 45%, transparent 45% 55%, var(--instrumental) 55% 100%);
+  border-radius: 2px;
+}
+
+.topbar h1 { font-size: 1.15rem; letter-spacing: -0.01em; }
+
+.tagline { margin: 0; color: var(--muted); font-size: 0.9rem; flex: 1; }
+
+.button {
+  border: 1px solid var(--rule);
+  background: var(--panel-raised);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+.button:hover { border-color: var(--muted); }
+.button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.button-primary { background: var(--vocals); color: #1a1205; border-color: var(--vocals); font-weight: 600; }
+.button-primary:hover { background: #f0b155; border-color: #f0b155; }
+
+main { max-width: 1120px; margin: 0 auto; padding: 1.5rem; }
+
+/* ---------- empty state ---------- */
+
+.dropzone {
+  border: 2px dashed var(--rule);
+  border-radius: 10px;
+  padding: 4.5rem 2rem;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+.dropzone.is-over { border-color: var(--vocals); background: rgba(232, 163, 61, 0.06); }
+.dropzone-lead { font-size: 1.5rem; margin: 0 0 0.5rem; }
+.dropzone-note { color: var(--muted); margin: 0; font-size: 0.9rem; }
+.dropzone-error { color: var(--danger); margin: 1rem 0 0; }
+
+/* ---------- progress ---------- */
+
+.progress { padding: 3rem 0; }
+.progress-label { margin: 0 0 0.75rem; color: var(--muted); }
+.meter { height: 6px; background: var(--panel-raised); border-radius: 3px; overflow: hidden; }
+.meter-fill { height: 100%; width: 0; background: var(--vocals); transition: width 0.1s linear; }
+
+/* ---------- waveform stage ---------- */
+
+.stage { margin: 0 0 1rem; }
+
+.waveform-shell {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  overflow: hidden;
+}
+#waveform { display: block; width: 100%; height: 260px; cursor: pointer; }
+
+.legend {
+  display: flex; gap: 1.25rem; align-items: center;
+  margin: 0.6rem 0 0; color: var(--muted); font-size: 0.85rem;
+}
+.legend span { display: flex; align-items: center; gap: 0.4rem; }
+.swatch { width: 0.8rem; height: 0.8rem; border-radius: 2px; }
+.swatch-vocals { background: var(--vocals); }
+.swatch-instrumental { background: var(--instrumental); }
+
+/* ---------- transport ---------- */
+
+.transport {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 0.85rem 0; border-bottom: 1px solid var(--rule);
+}
+.transport-time { color: var(--muted); font-size: 0.9rem; }
+.transport-name { margin-left: auto; color: var(--muted); font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
+
+/* ---------- console ---------- */
+
+.console {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 2rem;
+  padding: 1.5rem 0;
+}
+
+.console h2 { font-size: 0.95rem; color: var(--muted); font-weight: 600; margin-bottom: 1rem; }
+
+.strips { display: flex; gap: 1.5rem; }
+
+.strip {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--strip-colour);
+  border-radius: 6px;
+  padding: 1rem;
+  display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
+}
+.strip-vocals { --strip-colour: var(--vocals); }
+.strip-instrumental { --strip-colour: var(--instrumental); }
+
+.strip-name { font-weight: 600; font-size: 0.95rem; }
+.strip-value { color: var(--muted); font-size: 0.85rem; }
+
+.fader {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 2rem;
+  height: 170px;
+  accent-color: var(--strip-colour);
+}
+
+.strip-mute {
+  border: 1px solid var(--rule);
+  background: transparent;
+  border-radius: 4px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.strip-mute[aria-pressed="true"] { background: var(--danger); border-color: var(--danger); color: #1a0806; font-weight: 600; }
+
+.presets { display: flex; gap: 0.5rem; margin-top: 1rem; }
+.preset {
+  flex: 1;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  border-radius: 5px;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.9rem;
+}
+.preset[aria-pressed="true"] { border-color: var(--text); background: var(--panel-raised); }
+
+/* ---------- key plate ---------- */
+
+.plate {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 1.25rem;
+}
+
+.key-name { font-family: var(--serif); font-size: 2.6rem; line-height: 1.1; margin: 0; }
+.key-confidence { color: var(--muted); font-size: 0.85rem; margin: 0.25rem 0 0; }
+
+.scale-row { display: flex; gap: 0.35rem; margin: 1rem 0 0; padding: 0; list-style: none; }
+.scale-row li {
+  flex: 1;
+  text-align: center;
+  padding: 0.4rem 0.2rem;
+  background: var(--panel-raised);
+  border-radius: 4px;
+  font-family: var(--serif);
+  font-size: 1rem;
+}
+.scale-row li:first-child { background: var(--instrumental); color: #05201b; font-weight: 700; }
+
+.facts { display: flex; gap: 1.5rem; margin: 1.1rem 0 0; padding: 1.1rem 0 0; border-top: 1px solid var(--rule); }
+.fact-value { font-size: 1.15rem; }
+.fact-label { color: var(--muted); font-size: 0.8rem; }
+
+/* ---------- controls ---------- */
+
+.controls { padding: 1.5rem 0; border-top: 1px solid var(--rule); }
+.control { display: grid; grid-template-columns: 7rem 1fr 6rem; align-items: center; gap: 1rem; margin-bottom: 0.9rem; }
+.control label { font-size: 0.9rem; }
+.control input[type="range"] { width: 100%; accent-color: var(--instrumental); }
+.control output { color: var(--muted); font-size: 0.9rem; text-align: right; }
+
+.control-actions { display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem; flex-wrap: wrap; }
+.control-note { color: var(--muted); font-size: 0.85rem; }
+
+/* ---------- downloads ---------- */
+
+.downloads { display: flex; gap: 0.75rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); flex-wrap: wrap; }
+
+.notice {
+  border-left: 3px solid var(--danger);
+  background: rgba(228, 97, 77, 0.08);
+  padding: 0.75rem 1rem;
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 860px) {
+  .topbar { flex-wrap: wrap; }
+  .tagline { order: 3; flex-basis: 100%; }
+  .console { grid-template-columns: 1fr; }
+  .control { grid-template-columns: 1fr; gap: 0.35rem; }
+  .control output { text-align: left; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <h1>Splitkit</h1>
+  </div>
+  <p class="tagline">Split a song into vocals and backing track, find its key, and change it. Everything runs on this computer.</p>
+  <button type="button" class="button button-primary" id="open-file">Open a song</button>
+  <input type="file" id="file-input" accept="audio/*" hidden>
+</header>
+
+<main>
+
+  <section class="dropzone" id="dropzone">
+    <p class="dropzone-lead">Drop a song here</p>
+    <p class="dropzone-note">MP3, WAV, FLAC, M4A or OGG. Nothing is uploaded &mdash; the file never leaves this computer.</p>
+    <p class="dropzone-error" id="drop-error" role="alert"></p>
+  </section>
+
+  <section class="progress" id="progress-panel" hidden>
+    <p class="progress-label" id="progress-label">Working</p>
+    <div class="meter"><div class="meter-fill" id="progress-bar"></div></div>
+  </section>
+
+  <section id="workspace" hidden>
+
+    <p class="notice" id="mono-notice" hidden>
+      This track is mono. Splitting relies on the difference between the left and right
+      channels, so there is nothing here to separate. Try a stereo version of the song.
+    </p>
+
+    <figure class="stage">
+      <div class="waveform-shell">
+        <canvas id="waveform"></canvas>
+      </div>
+      <figcaption class="legend">
+        <span><i class="swatch swatch-vocals"></i>Vocals</span>
+        <span><i class="swatch swatch-instrumental"></i>Backing track</span>
+        <span>Click the waveform to jump.</span>
+      </figcaption>
+    </figure>
+
+    <div class="transport">
+      <button type="button" class="button" id="play">Play</button>
+      <span class="transport-time" id="time">0:00 / 0:00</span>
+      <span class="transport-name" id="track-name"></span>
+    </div>
+
+    <div class="console">
+
+      <section>
+        <h2>Mix</h2>
+        <div class="strips">
+          <div class="strip strip-vocals">
+            <span class="strip-name">Vocals</span>
+            <input type="range" class="fader" id="fader-vocals" min="0" max="100" value="100" aria-label="Vocal level">
+            <span class="strip-value" id="value-vocals">100%</span>
+            <button type="button" class="strip-mute" id="mute-vocals" aria-pressed="false">Mute</button>
+          </div>
+          <div class="strip strip-instrumental">
+            <span class="strip-name">Backing</span>
+            <input type="range" class="fader" id="fader-instrumental" min="0" max="100" value="100" aria-label="Backing track level">
+            <span class="strip-value" id="value-instrumental">100%</span>
+            <button type="button" class="strip-mute" id="mute-instrumental" aria-pressed="false">Mute</button>
+          </div>
+        </div>
+        <div class="presets">
+          <button type="button" class="preset" data-preset="original" aria-pressed="true">Original</button>
+          <button type="button" class="preset" data-preset="karaoke" aria-pressed="false">Karaoke</button>
+          <button type="button" class="preset" data-preset="acapella" aria-pressed="false">Vocals only</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Key and tempo</h2>
+        <div class="plate">
+          <p class="key-name" id="key-name">&mdash;</p>
+          <p class="key-confidence" id="key-confidence"></p>
+          <ul class="scale-row" id="scale-row"></ul>
+          <div class="facts">
+            <div>
+              <div class="fact-value" id="fact-bpm">&mdash;</div>
+              <div class="fact-label">BPM</div>
+            </div>
+            <div>
+              <div class="fact-value" id="fact-duration">0:00</div>
+              <div class="fact-label">Length</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="controls">
+      <h2>Adjust</h2>
+
+      <div class="control">
+        <label for="transpose">Transpose</label>
+        <input type="range" id="transpose" min="-12" max="12" step="1" value="0">
+        <output id="transpose-out">0</output>
+      </div>
+
+      <div class="control">
+        <label for="tempo">Tempo</label>
+        <input type="range" id="tempo" min="50" max="200" step="1" value="100">
+        <output id="tempo-out">100%</output>
+      </div>
+
+      <div class="control">
+        <label for="strength">Split strength</label>
+        <input type="range" id="strength" min="5" max="60" step="1" value="25">
+        <output id="strength-out">25</output>
+      </div>
+
+      <div class="control-actions">
+        <button type="button" class="button button-primary" id="apply" disabled>Apply changes</button>
+        <span class="control-note" id="apply-note"></span>
+      </div>
+    </div>
+
+    <div class="downloads">
+      <button type="button" class="button" id="download-vocals">Download vocals</button>
+      <button type="button" class="button" id="download-instrumental">Download backing track</button>
+      <button type="button" class="button" id="download-mix">Download the mix as you set it</button>
+    </div>
+
+  </section>
+
+</main>
+
+<script>
+(function () {
+'use strict';
+
+/* ===== src/dsp/fft.js ===== */
+/**
+ * Iterative radix-2 Cooley-Tukey FFT.
+ *
+ * Transforms run in place over separate real and imaginary Float64Arrays so
+ * the hot loop allocates nothing: a four-minute song calls this on the order
+ * of ten thousand times per channel, per pass.
+ */
+class FFT {
+  constructor(size) {
+    if (size < 2 || (size & (size - 1)) !== 0) {
+      throw new Error(`FFT size must be a power of two, got ${size}`);
+    }
+    this.size = size;
+
+    const bits = Math.round(Math.log2(size));
+    this.reversed = new Uint32Array(size);
+    for (let i = 0; i < size; i++) {
+      let r = 0;
+      for (let b = 0; b < bits; b++) r |= ((i >> b) & 1) << (bits - 1 - b);
+      this.reversed[i] = r;
+    }
+
+    const half = size >> 1;
+    this.cos = new Float64Array(half);
+    this.sin = new Float64Array(half);
+    for (let i = 0; i < half; i++) {
+      this.cos[i] = Math.cos((-2 * Math.PI * i) / size);
+      this.sin[i] = Math.sin((-2 * Math.PI * i) / size);
+    }
+  }
+
+  /** Forward transform, in place, unnormalised. */
+  forward(re, im) {
+    this.#butterflies(re, im, false);
+  }
+
+  /** Inverse transform, in place, scaled by 1/N so that it undoes `forward`. */
+  inverse(re, im) {
+    this.#butterflies(re, im, true);
+    const n = this.size;
+    for (let i = 0; i < n; i++) {
+      re[i] /= n;
+      im[i] /= n;
+    }
+  }
+
+  #butterflies(re, im, conjugateTwiddles) {
+    const n = this.size;
+    const reversed = this.reversed;
+
+    for (let i = 0; i < n; i++) {
+      const j = reversed[i];
+      if (j > i) {
+        let t = re[i]; re[i] = re[j]; re[j] = t;
+        t = im[i]; im[i] = im[j]; im[j] = t;
+      }
+    }
+
+    for (let len = 2; len <= n; len <<= 1) {
+      const half = len >> 1;
+      const stride = n / len;
+      for (let base = 0; base < n; base += len) {
+        for (let j = 0; j < half; j++) {
+          const tw = j * stride;
+          const wr = this.cos[tw];
+          const wi = conjugateTwiddles ? -this.sin[tw] : this.sin[tw];
+          const a = base + j;
+          const b = a + half;
+          const xr = re[b] * wr - im[b] * wi;
+          const xi = re[b] * wi + im[b] * wr;
+          re[b] = re[a] - xr;
+          im[b] = im[a] - xi;
+          re[a] += xr;
+          im[a] += xi;
+        }
+      }
+    }
+  }
+}
+
+/* ===== src/dsp/stft.js ===== */
+/**
+ * Weighted overlap-add short-time Fourier transform.
+ *
+ * Analysis and synthesis both apply a Hann window, and `finish` divides by the
+ * accumulated window energy. That last step is what makes reconstruction exact
+ * everywhere including the first and last samples, where the window sum has
+ * not yet reached its steady-state value.
+ *
+ * Frames are exposed one at a time rather than returned as a list: a
+ * four-minute song at 4096/1024 is ten thousand frames, and holding them all
+ * as complex spectra would cost well over half a gigabyte.
+ */
+class STFT {
+  constructor(frameSize, hopSize) {
+    if (frameSize % hopSize !== 0) {
+      throw new Error(`hop size ${hopSize} must divide frame size ${frameSize}`);
+    }
+    this.frameSize = frameSize;
+    this.hopSize = hopSize;
+    this.fft = new FFT(frameSize);
+
+    this.window = new Float64Array(frameSize);
+    for (let i = 0; i < frameSize; i++) {
+      this.window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / frameSize));
+    }
+  }
+
+  /**
+   * Where frame `index` begins in the signal. The first frames start before
+   * sample zero so that early samples sit under the body of a window rather
+   * than its near-zero edge.
+   */
+  frameStart(index) {
+    return index * this.hopSize - this.frameSize + this.hopSize;
+  }
+
+  frameCount(length) {
+    return Math.ceil((length + this.frameSize - this.hopSize) / this.hopSize) + 1;
+  }
+
+  /** Fill `re`/`im` with the windowed spectrum of frame `index`. */
+  analyzeFrame(signal, index, re, im) {
+    const start = this.frameStart(index);
+    const n = this.frameSize;
+    for (let i = 0; i < n; i++) {
+      const s = start + i;
+      re[i] = s >= 0 && s < signal.length ? signal[s] * this.window[i] : 0;
+      im[i] = 0;
+    }
+    this.fft.forward(re, im);
+  }
+
+  createAccumulator(length) {
+    return {
+      length,
+      sum: new Float64Array(length),
+      weight: new Float64Array(length),
+    };
+  }
+
+  /** Inverse-transform `re`/`im` and overlap-add it into the accumulator. */
+  addFrame(acc, index, re, im) {
+    this.fft.inverse(re, im);
+    const start = this.frameStart(index);
+    const n = this.frameSize;
+    for (let i = 0; i < n; i++) {
+      const s = start + i;
+      if (s < 0 || s >= acc.length) continue;
+      const w = this.window[i];
+      acc.sum[s] += re[i] * w;
+      acc.weight[s] += w * w;
+    }
+  }
+
+  /** Normalise by accumulated window energy, yielding the output signal. */
+  finish(acc) {
+    const out = new Float64Array(acc.length);
+    for (let i = 0; i < acc.length; i++) {
+      out[i] = acc.weight[i] > 1e-12 ? acc.sum[i] / acc.weight[i] : 0;
+    }
+    return out;
+  }
+}
+
+/* ===== src/dsp/separate.js ===== */
+const SEPARATION_DEFAULTS = {
+  frameSize: 4096,
+  hopSize: 1024,
+  /** Mask steepness. Higher pulls more borderline content out of the vocal stem. */
+  exponent: 2,
+  /** Below this, content is treated as bass and kept in the instrumental. */
+  lowCutHz: 180,
+  /** Above this, content is treated as cymbals and air, and kept likewise. */
+  highCutHz: 10000,
+};
+
+/**
+ * How centred a frequency bin is, from the two channel spectra.
+ *
+ *   2 * Re(L * conj(R)) / (|L|^2 + |R|^2)
+ *
+ * One expression covering both things that matter: it reaches 1 only when the
+ * two channels agree in phase AND in magnitude, falls to 0 when either channel
+ * is silent, and goes negative for out-of-phase content. Lead vocals sit near
+ * 1 because they are almost always mixed dead centre.
+ */
+function centredness(lre, lim, rre, rim) {
+  const dot = lre * rre + lim * rim;
+  const energy = lre * lre + lim * lim + rre * rre + rim * rim;
+  if (energy < 1e-20) return 0;
+  return (2 * dot) / energy;
+}
+
+/**
+ * Band weighting. Bass and kick drums are mixed dead centre too, so centredness
+ * alone would drag them into the vocal stem and leave a hollow instrumental.
+ * Raised-cosine edges avoid audible ringing at the transitions.
+ */
+function bandWeight(freq, lowCut, highCut) {
+  const lowEnd = lowCut * 1.6;
+  const highEnd = highCut * 1.4;
+  if (freq <= lowCut || freq >= highEnd) return 0;
+  if (freq < lowEnd) return 0.5 - 0.5 * Math.cos((Math.PI * (freq - lowCut)) / (lowEnd - lowCut));
+  if (freq <= highCut) return 1;
+  return 0.5 + 0.5 * Math.cos((Math.PI * (freq - highCut)) / (highEnd - highCut));
+}
+
+function buildBandWeights(frameSize, sampleRate, lowCut, highCut) {
+  const w = new Float64Array(frameSize);
+  const half = frameSize >> 1;
+  for (let k = 0; k <= half; k++) {
+    const weight = bandWeight((k * sampleRate) / frameSize, lowCut, highCut);
+    w[k] = weight;
+    if (k > 0 && k < half) w[frameSize - k] = weight;
+  }
+  return w;
+}
+
+/** True when the two channels carry effectively the same signal. */
+function isMono(left, right) {
+  let diff = 0;
+  let total = 0;
+  for (let i = 0; i < left.length; i++) {
+    const d = left[i] - right[i];
+    diff += d * d;
+    total += left[i] * left[i] + right[i] * right[i];
+  }
+  return total === 0 || diff / total < 1e-6;
+}
+
+/**
+ * Split a stereo track into a vocal stem and an instrumental stem.
+ *
+ * Only the vocal stem is synthesised; the instrumental is the original minus
+ * that. Overlap-add is linear, so the subtraction yields exactly what masking
+ * with (1 - mask) would have produced, for half the inverse transforms, and it
+ * makes the two stems sum back to the original bit for bit.
+ *
+ * Exposed as a generator that yields a 0..1 progress fraction. A file:// page
+ * cannot spawn a Worker, so the browser drives this loop in slices to stay
+ * responsive; `separate` below drives it straight through.
+ */
+function* separateSteps(left, right, sampleRate, options = {}) {
+  const opts = { ...SEPARATION_DEFAULTS, ...options };
+  const length = Math.min(left.length, right.length);
+  const stft = new STFT(opts.frameSize, opts.hopSize);
+  const band = buildBandWeights(opts.frameSize, sampleRate, opts.lowCutHz, opts.highCutHz);
+
+  const lre = new Float64Array(opts.frameSize);
+  const lim = new Float64Array(opts.frameSize);
+  const rre = new Float64Array(opts.frameSize);
+  const rim = new Float64Array(opts.frameSize);
+
+  const accL = stft.createAccumulator(length);
+  const accR = stft.createAccumulator(length);
+  const frames = stft.frameCount(length);
+
+  for (let f = 0; f < frames; f++) {
+    stft.analyzeFrame(left, f, lre, lim);
+    stft.analyzeFrame(right, f, rre, rim);
+
+    for (let k = 0; k < opts.frameSize; k++) {
+      const w = band[k];
+      let mask = 0;
+      if (w > 0) {
+        const c = centredness(lre[k], lim[k], rre[k], rim[k]);
+        if (c > 0) mask = Math.pow(c, opts.exponent) * w;
+      }
+      lre[k] *= mask; lim[k] *= mask;
+      rre[k] *= mask; rim[k] *= mask;
+    }
+
+    stft.addFrame(accL, f, lre, lim);
+    stft.addFrame(accR, f, rre, rim);
+    if ((f & 31) === 0) yield f / frames;
+  }
+
+  const vocalsL = stft.finish(accL);
+  const vocalsR = stft.finish(accR);
+  const instrumentalL = new Float64Array(length);
+  const instrumentalR = new Float64Array(length);
+  for (let i = 0; i < length; i++) {
+    instrumentalL[i] = left[i] - vocalsL[i];
+    instrumentalR[i] = right[i] - vocalsR[i];
+  }
+
+  return {
+    vocals: { left: vocalsL, right: vocalsR },
+    instrumental: { left: instrumentalL, right: instrumentalR },
+    mono: isMono(left.subarray(0, length), right.subarray(0, length)),
+  };
+}
+
+/** Run the separation to completion in one go. */
+function separate(left, right, sampleRate, options = {}) {
+  const steps = separateSteps(left, right, sampleRate, options);
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
+}
+
+/* ===== src/dsp/analyze.js ===== */
+const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const FLAT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+
+/** Major and minor keys that are conventionally written with flats. */
+const FLAT_MAJOR = new Set([5, 10, 3, 8, 1, 6]);      // F Bb Eb Ab Db Gb
+const FLAT_MINOR = new Set([2, 7, 0, 5, 10, 3]);      // Dm Gm Cm Fm Bbm Ebm
+
+/**
+ * Krumhansl-Kessler key profiles: the perceived stability of each scale degree,
+ * from the probe-tone experiments. Index 0 is the tonic.
+ */
+const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+
+const MAJOR_STEPS = [0, 2, 4, 5, 7, 9, 11];
+const MINOR_STEPS = [0, 2, 3, 5, 7, 8, 10];
+
+function noteNames(tonicPc, mode) {
+  const flat = mode === 'minor' ? FLAT_MINOR.has(tonicPc) : FLAT_MAJOR.has(tonicPc);
+  return flat ? FLAT_NAMES : SHARP_NAMES;
+}
+
+const PITCH_CLASS = (() => {
+  const map = new Map();
+  SHARP_NAMES.forEach((n, i) => map.set(n, i));
+  FLAT_NAMES.forEach((n, i) => map.set(n, i));
+  return map;
+})();
+
+/** The seven notes of a key, spelled the way a musician would write them. */
+function scaleNotes(tonic, mode) {
+  const pc = PITCH_CLASS.get(tonic);
+  if (pc === undefined) throw new Error(`unknown note ${tonic}`);
+  const names = noteNames(pc, mode);
+  const steps = mode === 'minor' ? MINOR_STEPS : MAJOR_STEPS;
+  return steps.map((s) => names[(pc + s) % 12]);
+}
+
+/**
+ * Fold the spectrum into twelve pitch classes, summed over the whole track.
+ *
+ * The band limit matters: below ~100 Hz the bins are too wide to resolve a
+ * semitone, and above ~3 kHz most of the energy is harmonics and cymbals
+ * rather than the notes actually being played.
+ */
+function chromagram(samples, sampleRate, { frameSize = 8192, hopSize = 4096, minHz = 100, maxHz = 3000 } = {}) {
+  const stft = new STFT(frameSize, hopSize);
+  const re = new Float64Array(frameSize);
+  const im = new Float64Array(frameSize);
+  const chroma = new Float64Array(12);
+  const half = frameSize >> 1;
+
+  const binPc = new Int8Array(half + 1).fill(-1);
+  for (let k = 1; k <= half; k++) {
+    const freq = (k * sampleRate) / frameSize;
+    if (freq < minHz || freq > maxHz) continue;
+    const midi = 69 + 12 * Math.log2(freq / 440);
+    binPc[k] = ((Math.round(midi) % 12) + 12) % 12;
+  }
+
+  const frames = stft.frameCount(samples.length);
+  for (let f = 0; f < frames; f++) {
+    stft.analyzeFrame(samples, f, re, im);
+    for (let k = 1; k <= half; k++) {
+      const pc = binPc[k];
+      if (pc < 0) continue;
+      chroma[pc] += Math.hypot(re[k], im[k]);
+    }
+  }
+  return chroma;
+}
+
+function pearson(a, b) {
+  const n = a.length;
+  let ma = 0, mb = 0;
+  for (let i = 0; i < n; i++) { ma += a[i]; mb += b[i]; }
+  ma /= n; mb /= n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    const x = a[i] - ma;
+    const y = b[i] - mb;
+    num += x * y; da += x * x; db += y * y;
+  }
+  if (da === 0 || db === 0) return 0;
+  return num / Math.sqrt(da * db);
+}
+
+/**
+ * Detect the musical key by correlating the track's chroma against all 24
+ * major and minor profiles and taking the best fit.
+ */
+function detectKey(samples, sampleRate, options = {}) {
+  const chroma = chromagram(samples, sampleRate, options);
+
+  const scored = [];
+  for (let tonic = 0; tonic < 12; tonic++) {
+    for (const mode of ['major', 'minor']) {
+      const base = mode === 'major' ? MAJOR_PROFILE : MINOR_PROFILE;
+      const rotated = new Float64Array(12);
+      for (let i = 0; i < 12; i++) rotated[i] = base[(i - tonic + 12) % 12];
+      scored.push({
+        tonic: noteNames(tonic, mode)[tonic],
+        mode,
+        name: `${noteNames(tonic, mode)[tonic]} ${mode}`,
+        score: pearson(chroma, rotated),
+      });
+    }
+  }
+  scored.sort((a, b) => b.score - a.score);
+
+  const best = scored[0];
+  return {
+    tonic: best.tonic,
+    mode: best.mode,
+    name: best.name,
+    notes: scaleNotes(best.tonic, best.mode),
+    confidence: Math.max(0, Math.min(1, best.score)),
+    alternatives: scored.slice(1, 4).map((s) => ({ name: s.name, confidence: Math.max(0, s.score) })),
+  };
+}
+
+/**
+ * Detect tempo from the spectral flux onset envelope.
+ *
+ * A log-normal prior centred near 120 BPM breaks the octave ambiguity that
+ * plain autocorrelation always has: a steady 140 BPM pulse correlates just as
+ * well at 70 BPM, and without the prior the slower reading often wins.
+ */
+function detectTempo(samples, sampleRate, { frameSize = 1024, hopSize = 256, minBpm = 60, maxBpm = 200 } = {}) {
+  const stft = new STFT(frameSize, hopSize);
+  const re = new Float64Array(frameSize);
+  const im = new Float64Array(frameSize);
+  const half = frameSize >> 1;
+  const frames = stft.frameCount(samples.length);
+
+  const flux = new Float64Array(frames);
+  let previous = new Float64Array(half + 1);
+  let current = new Float64Array(half + 1);
+  for (let f = 0; f < frames; f++) {
+    stft.analyzeFrame(samples, f, re, im);
+    let sum = 0;
+    for (let k = 1; k <= half; k++) {
+      current[k] = Math.hypot(re[k], im[k]);
+      const rise = current[k] - previous[k];
+      if (rise > 0) sum += rise;
+    }
+    flux[f] = sum;
+    const swap = previous; previous = current; current = swap;
+  }
+
+  let mean = 0;
+  for (let i = 0; i < frames; i++) mean += flux[i];
+  mean /= frames || 1;
+  for (let i = 0; i < frames; i++) flux[i] = Math.max(0, flux[i] - mean);
+
+  const fps = sampleRate / hopSize;
+  const minLag = Math.max(2, Math.floor((60 * fps) / maxBpm));
+  const maxLag = Math.min(frames - 1, Math.ceil((60 * fps) / minBpm));
+
+  const strength = new Float64Array(maxLag + 1);
+  let bestLag = minLag;
+  let bestScore = -Infinity;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let acf = 0;
+    for (let i = lag; i < frames; i++) acf += flux[i] * flux[i - lag];
+    const bpm = (60 * fps) / lag;
+    const prior = Math.exp(-0.5 * Math.pow(Math.log2(bpm / 120) / 0.7, 2));
+    strength[lag] = acf * prior;
+    if (strength[lag] > bestScore) { bestScore = strength[lag]; bestLag = lag; }
+  }
+
+  // Parabolic interpolation: lag resolution alone is coarser than 1 BPM.
+  let refined = bestLag;
+  if (bestLag > minLag && bestLag < maxLag) {
+    const a = strength[bestLag - 1];
+    const b = strength[bestLag];
+    const c = strength[bestLag + 1];
+    const denom = a - 2 * b + c;
+    if (denom !== 0) {
+      const shift = (0.5 * (a - c)) / denom;
+      if (Math.abs(shift) <= 1) refined = bestLag + shift;
+    }
+  }
+
+  let energy = 0;
+  for (let i = 0; i < frames; i++) energy += flux[i] * flux[i];
+  return {
+    bpm: (60 * fps) / refined,
+    confidence: energy > 0 ? Math.max(0, Math.min(1, bestScore / energy)) : 0,
+  };
+}
+
+/**
+ * The key you land in after transposing by a number of semitones.
+ *
+ * Spelling is recomputed from the destination rather than carried over, so
+ * shifting G major down a semitone reads as Gb major, the way it would be
+ * written, instead of F# major.
+ */
+function transposeKey(tonic, mode, semitones) {
+  const pc = PITCH_CLASS.get(tonic);
+  if (pc === undefined) throw new Error(`unknown note ${tonic}`);
+  const shifted = (((pc + semitones) % 12) + 12) % 12;
+  const name = noteNames(shifted, mode)[shifted];
+  return { tonic: name, mode, name: `${name} ${mode}`, notes: scaleNotes(name, mode) };
+}
+
+/* ===== src/dsp/phasevocoder.js ===== */
+const TWO_PI = 2 * Math.PI;
+
+/** Wrap a phase difference into (-pi, pi]. */
+function principalArgument(phase) {
+  return phase - TWO_PI * Math.round(phase / TWO_PI);
+}
+
+/**
+ * Stretch or compress audio in time without changing its pitch.
+ *
+ * Standard phase vocoder: estimate each bin's true frequency from how far its
+ * phase advanced between analysis frames, then re-advance that phase over a
+ * different synthesis hop.
+ *
+ * The identity phase-locking step is what keeps it from sounding underwater.
+ * Advancing every bin independently lets the partials of one note drift out of
+ * phase with each other; instead only spectral peaks accumulate phase, and the
+ * bins around a peak keep their original phase relationship to it.
+ */
+function* timeStretchSteps(samples, factor, options = {}) {
+  const { frameSize = 2048, analysisHop = 512 } = options;
+  const fft = new FFT(frameSize);
+  const half = frameSize >> 1;
+
+  const window = new Float64Array(frameSize);
+  for (let i = 0; i < frameSize; i++) {
+    window[i] = 0.5 * (1 - Math.cos((TWO_PI * i) / frameSize));
+  }
+
+  const targetLength = Math.round(samples.length * factor);
+  const padded = targetLength + 2 * frameSize;
+  const sum = new Float64Array(padded);
+  const weight = new Float64Array(padded);
+
+  const re = new Float64Array(frameSize);
+  const im = new Float64Array(frameSize);
+  const magnitude = new Float64Array(half + 1);
+  const phase = new Float64Array(half + 1);
+  const previousPhase = new Float64Array(half + 1);
+  const runningPhase = new Float64Array(half + 1);
+  const synthesisPhase = new Float64Array(half + 1);
+
+  const frames = Math.ceil((samples.length + frameSize) / analysisHop) + 1;
+
+  for (let f = 0; f < frames; f++) {
+    const inStart = f * analysisHop - frameSize + analysisHop;
+    for (let i = 0; i < frameSize; i++) {
+      const s = inStart + i;
+      re[i] = s >= 0 && s < samples.length ? samples[s] * window[i] : 0;
+      im[i] = 0;
+    }
+    fft.forward(re, im);
+
+    for (let k = 0; k <= half; k++) {
+      magnitude[k] = Math.hypot(re[k], im[k]);
+      phase[k] = Math.atan2(im[k], re[k]);
+    }
+
+    // Peaks own their phase; their neighbours follow along.
+    for (let k = 0; k <= half; k++) {
+      const left = k > 0 ? magnitude[k - 1] : -1;
+      const right = k < half ? magnitude[k + 1] : -1;
+      if (magnitude[k] > left && magnitude[k] >= right) {
+        const expected = (TWO_PI * k * analysisHop) / frameSize;
+        const drift = principalArgument(phase[k] - previousPhase[k] - expected);
+        runningPhase[k] = principalArgument(runningPhase[k] + (expected + drift) * factor);
+        synthesisPhase[k] = runningPhase[k];
+      } else {
+        synthesisPhase[k] = Number.NaN;
+      }
+    }
+    let nearestPeak = -1;
+    for (let k = 0; k <= half; k++) {
+      if (!Number.isNaN(synthesisPhase[k])) { nearestPeak = k; continue; }
+      let peak = nearestPeak;
+      for (let j = k + 1; j <= half; j++) {
+        if (!Number.isNaN(synthesisPhase[j])) {
+          if (peak < 0 || j - k < k - peak) peak = j;
+          break;
+        }
+      }
+      synthesisPhase[k] = peak >= 0
+        ? runningPhase[peak] + (phase[k] - phase[peak])
+        : phase[k];
+    }
+    for (let k = 0; k <= half; k++) {
+      previousPhase[k] = phase[k];
+      runningPhase[k] = synthesisPhase[k];
+    }
+
+    re[0] = magnitude[0] * Math.cos(synthesisPhase[0]); im[0] = 0;
+    re[half] = magnitude[half] * Math.cos(synthesisPhase[half]); im[half] = 0;
+    for (let k = 1; k < half; k++) {
+      const c = magnitude[k] * Math.cos(synthesisPhase[k]);
+      const s = magnitude[k] * Math.sin(synthesisPhase[k]);
+      re[k] = c; im[k] = s;
+      re[frameSize - k] = c; im[frameSize - k] = -s;
+    }
+    fft.inverse(re, im);
+
+    const outStart = Math.round(f * analysisHop * factor) - frameSize + analysisHop;
+    for (let i = 0; i < frameSize; i++) {
+      const s = outStart + i;
+      if (s < 0 || s >= padded) continue;
+      const w = window[i];
+      sum[s] += re[i] * w;
+      weight[s] += w * w;
+    }
+
+    if ((f & 31) === 0) yield f / frames;
+  }
+
+  const out = new Float64Array(targetLength);
+  for (let i = 0; i < targetLength; i++) {
+    out[i] = weight[i] > 1e-12 ? sum[i] / weight[i] : 0;
+  }
+  return out;
+}
+
+/** Read `input` at `ratio` samples per output sample, linearly interpolated. */
+function resampleTo(input, ratio, outLength) {
+  const out = new Float64Array(outLength);
+  for (let i = 0; i < outLength; i++) {
+    const pos = i * ratio;
+    const base = Math.floor(pos);
+    const frac = pos - base;
+    const a = base >= 0 && base < input.length ? input[base] : 0;
+    const b = base + 1 >= 0 && base + 1 < input.length ? input[base + 1] : 0;
+    out[i] = a + (b - a) * frac;
+  }
+  return out;
+}
+
+/**
+ * Transpose by a number of semitones, leaving the duration unchanged.
+ *
+ * Stretch by the frequency ratio, then resample by the same ratio: the stretch
+ * restores the length the resampling would otherwise change, and what is left
+ * is a pure pitch change.
+ */
+function* pitchShiftSteps(samples, semitones, options = {}) {
+  const ratio = Math.pow(2, semitones / 12);
+  const stretched = yield* timeStretchSteps(samples, ratio, options);
+  return resampleTo(stretched, ratio, samples.length);
+}
+
+function drive(steps) {
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
+}
+
+/** Run a time stretch to completion. */
+function timeStretch(samples, factor, options = {}) {
+  return drive(timeStretchSteps(samples, factor, options));
+}
+
+/** Run a pitch shift to completion. */
+function pitchShift(samples, semitones, options = {}) {
+  return drive(pitchShiftSteps(samples, semitones, options));
+}
+
+/**
+ * Change pitch and tempo together in a single pass.
+ *
+ * Running pitchShift and timeStretch one after the other would put the audio
+ * through the vocoder twice and smear it twice over. Folding both into one
+ * stretch and one resample keeps the artefacts to a single pass: stretch by
+ * tempo x ratio, then resample by ratio, which cancels the ratio out of the
+ * duration and leaves it in the pitch.
+ */
+function* transformSteps(samples, semitones, tempoFactor = 1, options = {}) {
+  const ratio = Math.pow(2, semitones / 12);
+  const targetLength = Math.round(samples.length * tempoFactor);
+  const stretched = yield* timeStretchSteps(samples, tempoFactor * ratio, options);
+  return resampleTo(stretched, ratio, targetLength);
+}
+
+/** Run a combined pitch and tempo change to completion. */
+function transform(samples, semitones, tempoFactor = 1, options = {}) {
+  return drive(transformSteps(samples, semitones, tempoFactor, options));
+}
+
+/* ===== src/dsp/wav.js ===== */
+/**
+ * Encode float channels as a 16-bit PCM WAV file.
+ *
+ * Written by hand rather than pulled from a library so the built page stays a
+ * single self-contained file with no dependencies to inline.
+ */
+function encodeWav(channels, sampleRate) {
+  if (!channels || channels.length === 0) {
+    throw new Error('encodeWav needs at least one channel');
+  }
+
+  const channelCount = channels.length;
+  const frames = channels[0].length;
+  const bytesPerSample = 2;
+  const blockAlign = channelCount * bytesPerSample;
+  const dataSize = frames * blockAlign;
+
+  const bytes = new Uint8Array(44 + dataSize);
+  const view = new DataView(bytes.buffer);
+
+  const writeAscii = (offset, text) => {
+    for (let i = 0; i < text.length; i++) bytes[offset + i] = text.charCodeAt(i);
+  };
+
+  writeAscii(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(8, 'WAVE');
+
+  writeAscii(12, 'fmt ');
+  view.setUint32(16, 16, true);             // fmt chunk size
+  view.setUint16(20, 1, true);              // uncompressed PCM
+  view.setUint16(22, channelCount, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);             // bits per sample
+
+  writeAscii(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < channelCount; c++) {
+      const raw = channels[c][i] || 0;
+      const clamped = raw > 1 ? 1 : raw < -1 ? -1 : raw;
+      // Negative range reaches one step further than positive in two's complement.
+      view.setInt16(offset, Math.round(clamped * (clamped < 0 ? 32768 : 32767)), true);
+      offset += 2;
+    }
+  }
+
+  return bytes;
+}
+
+/* ===== src/app/audio.js ===== */
+/** Shared AudioContext, created lazily so the page does not open one on load. */
+let sharedContext = null;
+function audioContext() {
+  if (!sharedContext) sharedContext = new (window.AudioContext || window.webkitAudioContext)();
+  return sharedContext;
+}
+
+/** Decode any format the browser can read into an AudioBuffer. */
+async function decodeFile(file) {
+  const bytes = await file.arrayBuffer();
+  return await audioContext().decodeAudioData(bytes);
+}
+
+/**
+ * Pull a buffer apart into two Float64Array channels.
+ *
+ * A mono file is widened into two identical channels so that everything
+ * downstream only ever has to deal with stereo.
+ */
+function toStereo(buffer) {
+  const left = Float64Array.from(buffer.getChannelData(0));
+  const right = buffer.numberOfChannels > 1
+    ? Float64Array.from(buffer.getChannelData(1))
+    : Float64Array.from(left);
+  return { left, right };
+}
+
+/** Build a playable AudioBuffer from a pair of float channels. */
+function toAudioBuffer(left, right, sampleRate) {
+  const buffer = audioContext().createBuffer(2, left.length, sampleRate);
+  buffer.copyToChannel(Float32Array.from(left), 0);
+  buffer.copyToChannel(Float32Array.from(right), 1);
+  return buffer;
+}
+
+/**
+ * Sum to mono and decimate, for analysis only.
+ *
+ * Key and tempo detection need nothing above about 3 kHz, so running them at a
+ * quarter of the sample rate cuts the work fourfold and changes no answer.
+ * Averaging each group of samples is a crude anti-alias filter, which is all
+ * this needs.
+ */
+function monoForAnalysis(left, right, sampleRate, targetRate = 11025) {
+  const factor = Math.max(1, Math.round(sampleRate / targetRate));
+  const outLength = Math.floor(left.length / factor);
+  const out = new Float64Array(outLength);
+  for (let i = 0; i < outLength; i++) {
+    let sum = 0;
+    for (let j = 0; j < factor; j++) {
+      const s = i * factor + j;
+      sum += (left[s] + right[s]) * 0.5;
+    }
+    out[i] = sum / factor;
+  }
+  return { samples: out, sampleRate: sampleRate / factor };
+}
+
+/** Peak envelope per pixel column, for waveform drawing. */
+function computePeaks(left, right, columns) {
+  const peaks = new Float32Array(columns);
+  const perColumn = Math.max(1, Math.floor(left.length / columns));
+  for (let c = 0; c < columns; c++) {
+    const start = c * perColumn;
+    const end = Math.min(left.length, start + perColumn);
+    let peak = 0;
+    for (let i = start; i < end; i++) {
+      const v = Math.abs(left[i]) + Math.abs(right[i]);
+      if (v > peak) peak = v;
+    }
+    peaks[c] = Math.min(1, peak / 2);
+  }
+  return peaks;
+}
+
+function formatTime(seconds) {
+  const safe = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  return Math.floor(safe / 60) + ':' + String(safe % 60).padStart(2, '0');
+}
+
+/** Hand the browser a file to save, without leaving the page. */
+function downloadBytes(bytes, filename) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* ===== src/app/waveform.js ===== */
+/**
+ * The mirrored stem view: vocals above the centre line, instrumental below,
+ * sharing one timeline and one playhead.
+ *
+ * Seeing both stems as a single shape is the point of this screen, so it gets
+ * the space and nothing around it competes for attention.
+ */
+class WaveformView {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.context = canvas.getContext('2d');
+    this.vocalPeaks = null;
+    this.instrumentalPeaks = null;
+    this.position = 0;
+    this.duration = 1;
+    this.width = 0;
+    this.height = 0;
+    this.colours = {
+      vocals: '#e8a33d',
+      instrumental: '#4fb9a5',
+      axis: '#33424f',
+      playhead: '#e6edf3',
+    };
+  }
+
+  /** Match the backing store to the CSS size so the lines stay crisp. */
+  resize() {
+    const ratio = window.devicePixelRatio || 1;
+    this.width = this.canvas.clientWidth;
+    this.height = this.canvas.clientHeight;
+    this.canvas.width = Math.round(this.width * ratio);
+    this.canvas.height = Math.round(this.height * ratio);
+    this.context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  }
+
+  setPeaks(vocalPeaks, instrumentalPeaks, duration) {
+    this.vocalPeaks = vocalPeaks;
+    this.instrumentalPeaks = instrumentalPeaks;
+    this.duration = duration || 1;
+    this.draw();
+  }
+
+  setPosition(seconds) {
+    this.position = seconds;
+    this.draw();
+  }
+
+  /** Seconds at a given x offset, for click-to-seek. */
+  timeAt(x) {
+    if (!this.width) return 0;
+    return Math.max(0, Math.min(this.duration, (x / this.width) * this.duration));
+  }
+
+  draw() {
+    if (!this.width) this.resize();
+    const ctx = this.context;
+    const axis = this.height / 2;
+
+    ctx.clearRect(0, 0, this.width, this.height);
+
+    ctx.strokeStyle = this.colours.axis;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, axis + 0.5);
+    ctx.lineTo(this.width, axis + 0.5);
+    ctx.stroke();
+
+    if (!this.vocalPeaks) return;
+    this.drawHalf(this.vocalPeaks, axis, -1, this.colours.vocals);
+    this.drawHalf(this.instrumentalPeaks, axis, 1, this.colours.instrumental);
+
+    const x = (this.position / this.duration) * this.width;
+    ctx.strokeStyle = this.colours.playhead;
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, this.height);
+    ctx.stroke();
+  }
+
+  drawHalf(peaks, axis, direction, colour) {
+    const ctx = this.context;
+    const usable = this.height / 2 - 6;
+    ctx.fillStyle = colour;
+    ctx.beginPath();
+    ctx.moveTo(0, axis);
+    for (let c = 0; c < peaks.length; c++) {
+      const x = (c / peaks.length) * this.width;
+      ctx.lineTo(x, axis + direction * peaks[c] * usable);
+    }
+    ctx.lineTo(this.width, axis);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+/* ===== src/app/player.js ===== */
+/**
+ * Plays both stems in lockstep through independent gain stages.
+ *
+ * The two sources are always started in the same call and scheduled to the
+ * same clock time, so they cannot drift apart. Position is read back from the
+ * audio clock rather than a timer, which keeps the playhead honest even while
+ * the main thread is busy with a separation pass.
+ */
+class StemPlayer {
+  constructor(context) {
+    this.context = context;
+    this.vocalGain = context.createGain();
+    this.instrumentalGain = context.createGain();
+    this.vocalGain.connect(context.destination);
+    this.instrumentalGain.connect(context.destination);
+    this.sources = [];
+    this.playing = false;
+    this.offset = 0;
+    this.startedAt = 0;
+    this.onEnded = null;
+    this.vocalBuffer = null;
+    this.instrumentalBuffer = null;
+  }
+
+  load(vocalBuffer, instrumentalBuffer) {
+    this.stop();
+    this.vocalBuffer = vocalBuffer;
+    this.instrumentalBuffer = instrumentalBuffer;
+    this.offset = 0;
+  }
+
+  get duration() {
+    return this.vocalBuffer ? this.vocalBuffer.duration : 0;
+  }
+
+  get position() {
+    if (!this.playing) return this.offset;
+    const elapsed = this.context.currentTime - this.startedAt;
+    return Math.max(0, Math.min(this.duration, this.offset + elapsed));
+  }
+
+  setGains(vocals, instrumental) {
+    const now = this.context.currentTime;
+    // Ramp rather than step: an instant gain change clicks audibly.
+    this.vocalGain.gain.setTargetAtTime(vocals, now, 0.01);
+    this.instrumentalGain.gain.setTargetAtTime(instrumental, now, 0.01);
+  }
+
+  play() {
+    if (!this.vocalBuffer || this.playing) return;
+    if (this.context.state === 'suspended') this.context.resume();
+    if (this.offset >= this.duration - 0.01) this.offset = 0;
+
+    const vocals = this.context.createBufferSource();
+    vocals.buffer = this.vocalBuffer;
+    vocals.connect(this.vocalGain);
+
+    const instrumental = this.context.createBufferSource();
+    instrumental.buffer = this.instrumentalBuffer;
+    instrumental.connect(this.instrumentalGain);
+
+    const at = this.context.currentTime + 0.02;
+    vocals.start(at, this.offset);
+    instrumental.start(at, this.offset);
+
+    vocals.onended = () => {
+      if (!this.playing) return;
+      this.stop();
+      this.offset = 0;
+      if (this.onEnded) this.onEnded();
+    };
+
+    this.sources = [vocals, instrumental];
+    this.startedAt = at;
+    this.playing = true;
+  }
+
+  pause() {
+    if (!this.playing) return;
+    const where = this.position;
+    this.stop();
+    this.offset = where;
+  }
+
+  seek(seconds) {
+    const wasPlaying = this.playing;
+    this.stop();
+    this.offset = Math.max(0, Math.min(this.duration, seconds));
+    if (wasPlaying) this.play();
+  }
+
+  stop() {
+    for (const source of this.sources) {
+      source.onended = null;
+      try {
+        source.stop();
+      } catch (error) {
+        // Already stopped; nothing to unwind.
+      }
+    }
+    this.sources = [];
+    this.playing = false;
+  }
+}
+
+/* ===== src/app/main.js ===== */
+const el = (id) => document.getElementById(id);
+
+const ui = {
+  dropzone: el('dropzone'),
+  dropError: el('drop-error'),
+  fileInput: el('file-input'),
+  openFile: el('open-file'),
+
+  progressPanel: el('progress-panel'),
+  progressLabel: el('progress-label'),
+  progressBar: el('progress-bar'),
+
+  workspace: el('workspace'),
+  monoNotice: el('mono-notice'),
+  waveform: el('waveform'),
+  play: el('play'),
+  time: el('time'),
+  trackName: el('track-name'),
+
+  faderVocals: el('fader-vocals'),
+  faderInstrumental: el('fader-instrumental'),
+  valueVocals: el('value-vocals'),
+  valueInstrumental: el('value-instrumental'),
+  muteVocals: el('mute-vocals'),
+  muteInstrumental: el('mute-instrumental'),
+  presets: Array.from(document.querySelectorAll('.preset')),
+
+  keyName: el('key-name'),
+  keyConfidence: el('key-confidence'),
+  scaleRow: el('scale-row'),
+  factBpm: el('fact-bpm'),
+  factDuration: el('fact-duration'),
+
+  strength: el('strength'),
+  strengthOut: el('strength-out'),
+  transpose: el('transpose'),
+  transposeOut: el('transpose-out'),
+  tempo: el('tempo'),
+  tempoOut: el('tempo-out'),
+  apply: el('apply'),
+  applyNote: el('apply-note'),
+
+  downloadVocals: el('download-vocals'),
+  downloadInstrumental: el('download-instrumental'),
+  downloadMix: el('download-mix'),
+};
+
+const view = new WaveformView(ui.waveform);
+let player = null;
+
+const state = {
+  name: '',
+  sampleRate: 44100,
+  source: null,      // the decoded original, as stereo floats
+  separated: null,   // stems straight out of the separator
+  rendered: null,    // stems after transpose and tempo, what you hear
+  key: null,
+  appliedStrength: 2,
+};
+
+const MIX_PRESETS = {
+  original: { vocals: 1, instrumental: 1 },
+  karaoke: { vocals: 0, instrumental: 1 },
+  acapella: { vocals: 1, instrumental: 0 },
+};
+
+/**
+ * Drive a DSP generator without freezing the page.
+ *
+ * A file:// page cannot spawn a Worker, so the only way to keep the interface
+ * alive during a minute of signal processing is to hand control back to the
+ * browser every so often. Yielding on elapsed time rather than a fixed step
+ * count keeps that responsive whatever the machine's speed.
+ */
+async function run(steps, label) {
+  ui.progressLabel.textContent = label;
+  let step = steps.next();
+  let lastBreak = performance.now();
+  while (!step.done) {
+    if (typeof step.value === 'number') {
+      ui.progressBar.style.width = (step.value * 100).toFixed(1) + '%';
+    }
+    if (performance.now() - lastBreak > 40) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      lastBreak = performance.now();
+    }
+    step = steps.next();
+  }
+  ui.progressBar.style.width = '100%';
+  return step.value;
+}
+
+function showStage(stage) {
+  ui.dropzone.hidden = stage !== 'idle';
+  ui.progressPanel.hidden = stage !== 'working';
+  ui.workspace.hidden = stage !== 'ready';
+}
+
+function separationOptions() {
+  // The slider reads as "how hard to push"; the engine wants a mask exponent.
+  return { exponent: 1 + Number(ui.strength.value) * 0.04 };
+}
+
+async function loadFile(file) {
+  ui.dropError.textContent = '';
+  showStage('working');
+  ui.progressBar.style.width = '0%';
+  ui.progressLabel.textContent = 'Reading the file';
+
+  let buffer;
+  try {
+    buffer = await decodeFile(file);
+  } catch (error) {
+    showStage('idle');
+    ui.dropError.textContent = 'That file could not be decoded. Try an MP3, WAV, FLAC, M4A or OGG.';
+    return;
+  }
+
+  state.name = file.name;
+  state.sampleRate = buffer.sampleRate;
+  state.source = toStereo(buffer);
+
+  await separateCurrent();
+  await analyseCurrent();
+  await renderCurrent();
+
+  ui.trackName.textContent = state.name;
+  showStage('ready');
+  applyMix();
+}
+
+async function separateCurrent() {
+  const { left, right } = state.source;
+  const result = await run(
+    separateSteps(left, right, state.sampleRate, separationOptions()),
+    'Separating vocals from the backing track'
+  );
+  state.separated = result;
+  state.appliedStrength = Number(ui.strength.value);
+  ui.monoNotice.hidden = !result.mono;
+}
+
+async function analyseCurrent() {
+  ui.progressLabel.textContent = 'Finding the key and tempo';
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // Read the key off the instrumental: vocal vibrato blurs the chroma.
+  const instrumental = state.separated.instrumental;
+  const analysis = monoForAnalysis(instrumental.left, instrumental.right, state.sampleRate);
+  state.key = detectKey(analysis.samples, analysis.sampleRate);
+  state.tempo = detectTempo(analysis.samples, analysis.sampleRate);
+}
+
+/** Apply the current transpose and tempo, and rebuild everything downstream. */
+async function renderCurrent() {
+  const semitones = Number(ui.transpose.value);
+  const tempoFactor = Number(ui.tempo.value) / 100;
+  const stems = state.separated;
+
+  if (semitones === 0 && tempoFactor === 1) {
+    state.rendered = { vocals: stems.vocals, instrumental: stems.instrumental };
+  } else {
+    const label = 'Transposing and stretching';
+    const vocals = {
+      left: await run(transformSteps(stems.vocals.left, semitones, tempoFactor), label),
+      right: await run(transformSteps(stems.vocals.right, semitones, tempoFactor), label),
+    };
+    const instrumental = {
+      left: await run(transformSteps(stems.instrumental.left, semitones, tempoFactor), label),
+      right: await run(transformSteps(stems.instrumental.right, semitones, tempoFactor), label),
+    };
+    state.rendered = { vocals, instrumental };
+  }
+
+  const rate = state.sampleRate;
+  const vocalBuffer = toAudioBuffer(state.rendered.vocals.left, state.rendered.vocals.right, rate);
+  const instrumentalBuffer = toAudioBuffer(state.rendered.instrumental.left, state.rendered.instrumental.right, rate);
+
+  if (!player) {
+    player = new StemPlayer(vocalBuffer.context || audioContext());
+    player.onEnded = () => {
+      ui.play.textContent = 'Play';
+      view.setPosition(0);
+      updateClock();
+    };
+  }
+  player.load(vocalBuffer, instrumentalBuffer);
+
+  view.resize();
+  const columns = Math.max(200, Math.floor(view.width));
+  view.setPeaks(
+    computePeaks(state.rendered.vocals.left, state.rendered.vocals.right, columns),
+    computePeaks(state.rendered.instrumental.left, state.rendered.instrumental.right, columns),
+    player.duration
+  );
+
+  paintReadout();
+  updateClock();
+  applyMix();
+}
+
+function paintReadout() {
+  const semitones = Number(ui.transpose.value);
+  const key = semitones === 0
+    ? state.key
+    : transposeKey(state.key.tonic, state.key.mode, semitones);
+
+  ui.keyName.textContent = key.name;
+  ui.keyConfidence.textContent = semitones === 0
+    ? `Detected with ${(state.key.confidence * 100).toFixed(0)}% confidence`
+    : `${state.key.name} transposed by ${semitones > 0 ? '+' : ''}${semitones}`;
+
+  ui.scaleRow.replaceChildren(...key.notes.map((note) => {
+    const li = document.createElement('li');
+    li.textContent = note;
+    return li;
+  }));
+
+  const bpm = state.tempo.bpm * (Number(ui.tempo.value) / 100);
+  ui.factBpm.textContent = bpm.toFixed(0);
+  ui.factDuration.textContent = formatTime(player ? player.duration : 0);
+}
+
+function applyMix() {
+  if (!player) return;
+  const vocals = ui.muteVocals.getAttribute('aria-pressed') === 'true'
+    ? 0 : Number(ui.faderVocals.value) / 100;
+  const instrumental = ui.muteInstrumental.getAttribute('aria-pressed') === 'true'
+    ? 0 : Number(ui.faderInstrumental.value) / 100;
+  player.setGains(vocals, instrumental);
+  ui.valueVocals.textContent = Math.round(vocals * 100) + '%';
+  ui.valueInstrumental.textContent = Math.round(instrumental * 100) + '%';
+}
+
+function updateClock() {
+  if (!player) return;
+  ui.time.textContent = formatTime(player.position) + ' / ' + formatTime(player.duration);
+}
+
+function tick() {
+  if (player && player.playing) {
+    view.setPosition(player.position);
+    updateClock();
+  }
+  requestAnimationFrame(tick);
+}
+
+function markPendingChanges() {
+  const changed =
+    Number(ui.strength.value) !== state.appliedStrength ||
+    Number(ui.transpose.value) !== state.renderedTranspose ||
+    Number(ui.tempo.value) !== state.renderedTempo;
+  ui.apply.disabled = !changed;
+  ui.applyNote.textContent = changed ? 'Not applied yet' : '';
+}
+
+function rememberRenderSettings() {
+  state.renderedTranspose = Number(ui.transpose.value);
+  state.renderedTempo = Number(ui.tempo.value);
+}
+
+/* ---------- wiring ---------- */
+
+ui.openFile.addEventListener('click', () => ui.fileInput.click());
+ui.fileInput.addEventListener('change', () => {
+  if (ui.fileInput.files[0]) loadFile(ui.fileInput.files[0]);
+});
+
+for (const event of ['dragenter', 'dragover']) {
+  ui.dropzone.addEventListener(event, (e) => {
+    e.preventDefault();
+    ui.dropzone.classList.add('is-over');
+  });
+}
+for (const event of ['dragleave', 'drop']) {
+  ui.dropzone.addEventListener(event, () => ui.dropzone.classList.remove('is-over'));
+}
+ui.dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file) loadFile(file);
+});
+ui.dropzone.addEventListener('click', () => ui.fileInput.click());
+
+ui.play.addEventListener('click', () => {
+  if (!player) return;
+  if (player.playing) {
+    player.pause();
+    ui.play.textContent = 'Play';
+  } else {
+    player.play();
+    ui.play.textContent = 'Pause';
+  }
+  updateClock();
+});
+
+ui.waveform.addEventListener('click', (e) => {
+  if (!player) return;
+  const bounds = ui.waveform.getBoundingClientRect();
+  player.seek(view.timeAt(e.clientX - bounds.left));
+  view.setPosition(player.position);
+  updateClock();
+});
+
+for (const fader of [ui.faderVocals, ui.faderInstrumental]) {
+  fader.addEventListener('input', () => {
+    ui.presets.forEach((p) => p.setAttribute('aria-pressed', 'false'));
+    applyMix();
+  });
+}
+
+for (const button of [ui.muteVocals, ui.muteInstrumental]) {
+  button.addEventListener('click', () => {
+    const on = button.getAttribute('aria-pressed') === 'true';
+    button.setAttribute('aria-pressed', String(!on));
+    applyMix();
+  });
+}
+
+for (const preset of ui.presets) {
+  preset.addEventListener('click', () => {
+    const mix = MIX_PRESETS[preset.dataset.preset];
+    ui.faderVocals.value = String(mix.vocals * 100);
+    ui.faderInstrumental.value = String(mix.instrumental * 100);
+    ui.muteVocals.setAttribute('aria-pressed', 'false');
+    ui.muteInstrumental.setAttribute('aria-pressed', 'false');
+    ui.presets.forEach((p) => p.setAttribute('aria-pressed', String(p === preset)));
+    applyMix();
+  });
+}
+
+ui.strength.addEventListener('input', () => {
+  ui.strengthOut.textContent = ui.strength.value;
+  markPendingChanges();
+});
+ui.transpose.addEventListener('input', () => {
+  const v = Number(ui.transpose.value);
+  ui.transposeOut.textContent = v > 0 ? '+' + v : String(v);
+  markPendingChanges();
+});
+ui.tempo.addEventListener('input', () => {
+  ui.tempoOut.textContent = ui.tempo.value + '%';
+  markPendingChanges();
+});
+
+ui.apply.addEventListener('click', async () => {
+  const wasPlaying = player && player.playing;
+  if (player) player.pause();
+  ui.play.textContent = 'Play';
+  showStage('working');
+  ui.progressBar.style.width = '0%';
+
+  if (Number(ui.strength.value) !== state.appliedStrength) {
+    await separateCurrent();
+    await analyseCurrent();
+  }
+  await renderCurrent();
+  rememberRenderSettings();
+  markPendingChanges();
+  showStage('ready');
+  if (wasPlaying) {
+    player.play();
+    ui.play.textContent = 'Pause';
+  }
+});
+
+function stemFilename(suffix) {
+  const base = state.name.replace(/\.[^.]+$/, '') || 'track';
+  return `${base} - ${suffix}.wav`;
+}
+
+ui.downloadVocals.addEventListener('click', () => {
+  const s = state.rendered.vocals;
+  downloadBytes(encodeWav([s.left, s.right], state.sampleRate), stemFilename('vocals'));
+});
+ui.downloadInstrumental.addEventListener('click', () => {
+  const s = state.rendered.instrumental;
+  downloadBytes(encodeWav([s.left, s.right], state.sampleRate), stemFilename('instrumental'));
+});
+ui.downloadMix.addEventListener('click', () => {
+  const vocalLevel = ui.muteVocals.getAttribute('aria-pressed') === 'true'
+    ? 0 : Number(ui.faderVocals.value) / 100;
+  const instrumentalLevel = ui.muteInstrumental.getAttribute('aria-pressed') === 'true'
+    ? 0 : Number(ui.faderInstrumental.value) / 100;
+  const { vocals, instrumental } = state.rendered;
+  const left = new Float64Array(vocals.left.length);
+  const right = new Float64Array(vocals.right.length);
+  for (let i = 0; i < left.length; i++) {
+    left[i] = vocals.left[i] * vocalLevel + instrumental.left[i] * instrumentalLevel;
+    right[i] = vocals.right[i] * vocalLevel + instrumental.right[i] * instrumentalLevel;
+  }
+  downloadBytes(encodeWav([left, right], state.sampleRate), stemFilename('mix'));
+});
+
+window.addEventListener('resize', () => {
+  if (!ui.workspace.hidden && state.rendered) {
+    view.resize();
+    view.draw();
+  }
+});
+
+rememberRenderSettings();
+markPendingChanges();
+showStage('idle');
+requestAnimationFrame(tick);
+
+})();
+</script>
+</body>
+</html>
