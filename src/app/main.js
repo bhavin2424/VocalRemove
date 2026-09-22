@@ -118,6 +118,15 @@ function showStage(stage) {
 function separationOptions() {
   const push = Number(ui.strength.value) / 100;
   return {
+    /*
+     * How far down the mask is allowed to reach. More than half of what you hear as a
+     * male lead is its fundamental, and that sits in the same octave as the bass
+     * guitar, both dead centre, where nothing can tell them apart. Stopping at 180 Hz
+     * keeps the bass perfect and leaves that whole fundamental in the karaoke track;
+     * reaching down to 70 takes the voice with it and thins the bass on the way. There
+     * is no setting that does both, so it moves with the slider.
+     */
+    lowEdgeHz: 180 - push * 110,
     exponent: 1.4 + push * 2.0,
     // Held deliberately short of the point where the subtraction overshoots. Past
     // that the residual crosses through silence and comes back up phase-inverted, so

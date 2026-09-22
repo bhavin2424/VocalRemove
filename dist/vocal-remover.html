@@ -624,7 +624,18 @@ const SEPARATION_DEFAULTS = {
   hopSize: 1024,
   /** Mask steepness. Higher drives borderline bins towards fully in or fully out. */
   exponent: 2,
-  /** Below this, content is treated as bass and kept in the backing track. */
+  /**
+   * Nothing below this is touched at all: sub-bass and the body of a kick drum, where
+   * no voice lives and anything removed is felt as the bottom falling out of the mix.
+   */
+  lowEdgeHz: 70,
+  /**
+   * Full strength begins here. Between the edge and this point the mask is ramped in
+   * rather than switched on, because that octave is shared: it holds the fundamental
+   * of a male voice and the bass guitar at the same time, both dead centre. A hard cut
+   * here protects the bass perfectly and lets the whole fundamental of a male lead
+   * through untouched, which is more than half of what a listener hears as the voice.
+   */
   lowCutHz: 180,
   /** Above this, content is treated as cymbals and air, and kept likewise. */
   highCutHz: 10000,
@@ -649,7 +660,66 @@ const SEPARATION_DEFAULTS = {
    * harder at the cost of that guarantee.
    */
   overSubtraction: 1,
+  /**
+   * Find the note the voice is singing, and remove its fundamental by name rather
+   * than by position.
+   *
+   * The harmonics above the low band separate cleanly, and they say what note is being
+   * sung. That is enough to place the fundamental, which otherwise sits in the octave
+   * shared with the bass guitar where nothing can pick it out.
+   *
+   * Off by default, because measured against the alternative it does not pay for
+   * itself. On a male lead it buys about two decibels more removal and costs a quarter
+   * of the bass; on a female lead, whose fundamental is above the low band anyway, it
+   * buys nothing and still costs some. Worth turning on only for low male leads in
+   * material where the bottom end matters less than the voice.
+   */
+  trackFundamental: false,
+  /** The range a sung fundamental is looked for in, low male to high female. */
+  minF0Hz: 75,
+  maxF0Hz: 420,
+  /**
+   * How far the harmonic evidence must stand above the average for a frame to count as
+   * sung at all. Too low and the comb chases the bass around during instrumental
+   * passages; too high and quiet singing keeps its fundamental.
+   */
+  f0Confidence: 2.2,
 };
+
+/**
+ * The fundamental of whatever is being sung, from the harmonics that separated well.
+ *
+ * Scored on harmonics two and up, and only above `fromBin`, because the fundamental
+ * itself is exactly the part that could not be measured -- that is the whole reason
+ * for looking. A run of harmonics at consistent spacing is the signature of one voice
+ * on one note, and the bass, an octave or more below and on its own note, does not
+ * produce it.
+ */
+function estimateF0(vocalEst, half, binsPerHz, opts, fromBin) {
+  let bestHz = 0;
+  let best = 0;
+  let total = 0;
+  let counted = 0;
+
+  for (let k = fromBin; k <= half; k++) { total += vocalEst[k]; counted++; }
+  const average = counted > 0 ? total / counted : 0;
+  if (average <= 0) return 0;
+
+  for (let hz = opts.minF0Hz; hz <= opts.maxF0Hz; hz++) {
+    let score = 0;
+    let used = 0;
+    for (let h = 2; h <= 8; h++) {
+      const k = Math.round(hz * h * binsPerHz);
+      if (k > half) break;
+      if (k < fromBin) continue;
+      score += vocalEst[k];
+      used++;
+    }
+    if (used >= 3 && score / used > best) { best = score / used; bestHz = hz; }
+  }
+
+  return best > opts.f0Confidence * average ? bestHz : 0;
+}
 
 /**
  * Width of the broadband floor estimate, as taps and the bin stride between them.
@@ -710,19 +780,18 @@ function broadbandFloor(mag, half, out, scratch) {
  * estimate alone would drag them into the vocal stem and leave a hollow backing
  * track. Raised-cosine edges avoid audible ringing at the transitions.
  */
-function bandWeight(freq, lowCut, highCut) {
-  const lowEnd = lowCut * 1.6;
+function bandWeight(freq, lowEdge, lowCut, highCut) {
   const highEnd = highCut * 1.4;
-  if (freq <= lowCut || freq >= highEnd) return 0;
-  if (freq < lowEnd) return 0.5 - 0.5 * Math.cos((Math.PI * (freq - lowCut)) / (lowEnd - lowCut));
+  if (freq <= lowEdge || freq >= highEnd) return 0;
+  if (freq < lowCut) return 0.5 - 0.5 * Math.cos((Math.PI * (freq - lowEdge)) / (lowCut - lowEdge));
   if (freq <= highCut) return 1;
   return 0.5 + 0.5 * Math.cos((Math.PI * (freq - highCut)) / (highEnd - highCut));
 }
 
-function buildBandWeights(frameSize, sampleRate, lowCut, highCut) {
+function buildBandWeights(frameSize, sampleRate, lowEdge, lowCut, highCut) {
   const half = frameSize >> 1;
   const w = new Float64Array(half + 1);
-  for (let k = 0; k <= half; k++) w[k] = bandWeight((k * sampleRate) / frameSize, lowCut, highCut);
+  for (let k = 0; k <= half; k++) w[k] = bandWeight((k * sampleRate) / frameSize, lowEdge, lowCut, highCut);
   return w;
 }
 
@@ -777,7 +846,7 @@ function* separateSteps(left, right, sampleRate, options = {}) {
   const opts = { ...SEPARATION_DEFAULTS, ...options };
   const length = Math.min(left.length, right.length);
   const stft = new STFT(opts.frameSize, opts.hopSize);
-  const band = buildBandWeights(opts.frameSize, sampleRate, opts.lowCutHz, opts.highCutHz);
+  const band = buildBandWeights(opts.frameSize, sampleRate, opts.lowEdgeHz, opts.lowCutHz, opts.highCutHz);
 
   const n = opts.frameSize;
   const half = n >> 1;
@@ -797,6 +866,10 @@ function* separateSteps(left, right, sampleRate, options = {}) {
   const rre = new Float64Array(n);
   const rim = new Float64Array(n);
   const floor = new Float64Array(bins);
+  const vocalEst = new Float64Array(bins);
+  const f0Est = new Float64Array(bins);
+  const binsPerHz = n / sampleRate;
+  const lowCutBin = Math.round(opts.lowCutHz * binsPerHz);
   const sustained = new Float64Array(bins);
   const scratch = new Float64Array(Math.max(FLOOR_TAPS, TIME_TAPS));
 
@@ -839,16 +912,64 @@ function* separateSteps(left, right, sampleRate, options = {}) {
       sustained[k] = medianOf(scratch, TIME_TAPS);
     }
 
+    // The estimate first, across the whole spectrum and before any band weighting.
+    // The band ramp decides how much of the estimate to act on, not how much of it
+    // there is, and the fundamental search needs the unweighted version.
     for (let k = 0; k <= half; k++) {
-      const w = band[k];
+      const structure = Math.max(
+        opts.percussiveSubtraction * floor[k],
+        opts.sustainedSubtraction * sustained[k]
+      );
+      const vocal = midMag[magSlot + k] - opts.sideSubtraction * sideMag[magSlot + k] - structure;
+      vocalEst[k] = vocal > 0 ? vocal : 0;
+    }
+
+    let combLo = -1;
+    let combHi = -1;
+    if (opts.trackFundamental) {
+      /*
+       * The search runs on its own estimate, with the sustained part subtracted in
+       * full rather than at the mask's setting. A bass guitar holding a note vanishes
+       * under that; a voice, which moves, does not. Searching on the same half-strength
+       * estimate the mask uses lets the bass score as well as the singer, and the comb
+       * then locks onto the bass and notches the low end out of the backing track.
+       */
+      for (let k = 0; k <= half; k++) {
+        const steady = Math.max(opts.percussiveSubtraction * floor[k], sustained[k]);
+        const v = midMag[magSlot + k] - opts.sideSubtraction * sideMag[magSlot + k] - steady;
+        f0Est[k] = v > 0 ? v : 0;
+      }
+      const f0 = estimateF0(f0Est, half, binsPerHz, opts, lowCutBin);
+      if (f0 > 0 && f0 < opts.lowCutHz) {
+        /*
+         * The fundamental could not be measured where it sits, so it is taken on the
+         * word of its own harmonics: however much voice was found at the octave and
+         * the twelfth above, at least that much is here too. Capped at what the bin
+         * actually holds, so this can only ever reclassify energy that is present.
+         */
+        let evidence = 0;
+        for (let h = 2; h <= 4; h++) {
+          const k = Math.round(f0 * h * binsPerHz);
+          if (k <= half && vocalEst[k] > evidence) evidence = vocalEst[k];
+        }
+        const centre = f0 * binsPerHz;
+        combLo = Math.max(0, Math.floor(centre - 1.5));
+        combHi = Math.min(half, Math.ceil(centre + 1.5));
+        for (let k = combLo; k <= combHi; k++) {
+          const mag = midMag[magSlot + k];
+          vocalEst[k] = Math.min(mag, Math.max(vocalEst[k], evidence));
+        }
+      }
+    }
+
+    for (let k = 0; k <= half; k++) {
+      // A bin the fundamental was traced to is acted on at full strength whatever the
+      // band ramp says, which is the point of having gone looking for it.
+      const w = k >= combLo && k <= combHi ? 1 : band[k];
       const mag = midMag[magSlot + k];
       let mask = 0;
       if (w > 0 && mag > 1e-12) {
-        const structure = Math.max(
-          opts.percussiveSubtraction * floor[k],
-          opts.sustainedSubtraction * sustained[k]
-        );
-        const vocal = mag - opts.sideSubtraction * sideMag[magSlot + k] - structure;
+        const vocal = vocalEst[k];
         if (vocal > 0) {
           // Wiener form: whatever the subtraction did not claim is the accompaniment,
           // and the exponent decides how sharply the line between them is drawn.
@@ -1984,6 +2105,15 @@ function showStage(stage) {
 function separationOptions() {
   const push = Number(ui.strength.value) / 100;
   return {
+    /*
+     * How far down the mask is allowed to reach. More than half of what you hear as a
+     * male lead is its fundamental, and that sits in the same octave as the bass
+     * guitar, both dead centre, where nothing can tell them apart. Stopping at 180 Hz
+     * keeps the bass perfect and leaves that whole fundamental in the karaoke track;
+     * reaching down to 70 takes the voice with it and thins the bass on the way. There
+     * is no setting that does both, so it moves with the slider.
+     */
+    lowEdgeHz: 180 - push * 110,
     exponent: 1.4 + push * 2.0,
     // Held deliberately short of the point where the subtraction overshoots. Past
     // that the residual crosses through silence and comes back up phase-inverted, so

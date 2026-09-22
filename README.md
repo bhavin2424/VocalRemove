@@ -56,8 +56,30 @@ music mixed in the same place with it. At the lowest setting the two stems sum
 back to the input exactly; above that the backing track is deliberately
 over-scrubbed and they no longer do.
 
-This is signal processing, not a trained model. It works well on well-separated
-stereo mixes and cannot do anything with a mono file.
+The slider also sets how far down the mask reaches. More than half of what you
+hear as a male lead is its fundamental, and that sits in the same octave as the
+bass guitar, both dead centre, where no measurement tells them apart. Stopping
+at 180 Hz keeps the bass intact and leaves that whole fundamental in the karaoke
+track; reaching down to 70 Hz takes the voice with it and thins the bass on the
+way. There is no setting that does both.
+
+## What this cannot do
+
+This is signal processing, not a trained model. It needs a stereo file and can
+do nothing with a mono one, and there is a ceiling on how much of a voice it can
+remove.
+
+The engine knows a lead vocal by where it sits, how broadband it is and how
+steady it is. A lead vocal, a piano and a bass guitar in the same register are
+alike on all three counts, so every increase in how much of the voice comes out
+costs some of the music that was mixed in the same place. Measured against known
+stems on synthetic mixes, the backing track comes out between three and seven
+decibels down on the lead, which is to say the voice is clearly reduced and still
+audible, not gone.
+
+Getting past that needs a model trained on what a voice actually sounds like,
+which is a different kind of program and not one that fits in a single dependency
+free HTML file.
 
 ## How the key change works
 
